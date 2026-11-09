@@ -20,9 +20,9 @@ export const ROLE_LABELS: Record<MemberRole, string> = {
 /**
  * One line per role, shown in the invite picker.
  *
- * `manager` and `staff` describe a tier rather than a fixed set of screens:
- * this template ships no domain modules, so their exact permissions are
- * whatever the first module that uses `canManage`/`canFrontDesk` decides.
+ * `manager` and `staff` describe a tier rather than a fixed set of screens: the
+ * products section interprets them (manager writes, staff reads), and a module
+ * that needs a front-desk writer attaches to `canFrontDesk`.
  */
 export const ROLE_DESCRIPTIONS: Record<MemberRole, string> = {
   owner: "Full control, including billing and ownership.",
@@ -65,8 +65,10 @@ export function canAdminister(role: MemberRole): boolean {
 /**
  * True when the role may write a feature module's records.
  *
- * No screen uses this yet: it is the seam a module attaches to, together with
- * `requireManager` in `lib/actions/support.ts`.
+ * The products section is the first user: `requireManager` in
+ * `lib/actions/support.ts` is its Server Action counterpart, and the module's
+ * RLS policies admit the same three roles. Both checks exist because neither is
+ * sufficient on its own.
  */
 export function canManage(role: MemberRole): boolean {
   return canAdminister(role) || role === "manager";

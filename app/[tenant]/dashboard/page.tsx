@@ -93,8 +93,9 @@ async function DashboardContent({
         <CardHeader>
           <CardTitle>Getting started</CardTitle>
           <CardDescription>
-            This workspace is the base every feature module builds on: sign-in,
-            members and roles, RLS-scoped data and billing.
+            This workspace is the base every section builds on: sign-in, members
+            and roles, RLS-scoped data and billing — plus whatever sections you
+            switch on.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -102,8 +103,8 @@ async function DashboardContent({
             <li>Invite your team and choose a role for each person.</li>
             <li>Review the plan and the payment details on file.</li>
             <li>
-              Add the first section for this workspace — see “Adding a new
-              section” in the README.
+              Switch on <strong>Products</strong> on Settings → Sections to start
+              a catalogue of products, categories, variants and stock.
             </li>
           </ul>
           {isAdmin ? (

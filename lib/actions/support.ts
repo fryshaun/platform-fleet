@@ -2,6 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 
+import { isSectionEnabled, type SectionKey } from "@/lib/features";
 import {
   canAdminister,
   canFrontDesk,
@@ -89,6 +90,26 @@ export function requireFrontDesk(context: ActionContext, slug: string) {
   if (!canFrontDesk(context.role)) {
     redirectWith(slug, "dashboard", {
       error: "You do not have permission to do that.",
+    });
+  }
+}
+
+/**
+ * Throws unless the workspace has the section switched on.
+ *
+ * This is the Server Action half of `has_company_section()`: RLS is what
+ * actually stops a write when a section is off, and this turns the resulting
+ * empty result set into an explanation instead of a silent no-op. Owner and
+ * admin can flip the switch on Settings → Sections.
+ */
+export function requireSection(
+  context: ActionContext,
+  slug: string,
+  section: SectionKey,
+) {
+  if (!isSectionEnabled(context.company, section)) {
+    redirectWith(slug, "dashboard", {
+      error: "That section is not enabled for this workspace.",
     });
   }
 }

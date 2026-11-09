@@ -5,6 +5,7 @@ import { SidebarNav } from "@/components/tenant/sidebar-nav";
 import { UserMenu } from "@/components/tenant/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getTenantContext } from "@/lib/auth";
+import { enabledSectionKeys } from "@/lib/features";
 import { canAdminister, roleLabel } from "@/lib/roles";
 
 /**
@@ -36,7 +37,10 @@ export async function TenantSidebar({ slug }: { slug: string }) {
           {initials(company.name)}
         </Link>
 
-        <SidebarNav tenantSlug={company.slug} />
+        <SidebarNav
+          tenantSlug={company.slug}
+          sections={enabledSectionKeys(company)}
+        />
       </div>
 
       <div className="flex flex-col items-center gap-2">

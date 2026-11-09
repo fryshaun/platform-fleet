@@ -23,6 +23,7 @@ import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
 import { MembersSection, type TeamMember } from "./members-section";
+import { SectionsSection } from "./sections-section";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -162,6 +163,8 @@ async function SettingsContent({
           </form>
         </CardContent>
       </Card>
+
+      <SectionsSection slug={company.slug} enabled={company.enabled_sections} />
 
       <MembersSection
         slug={company.slug}

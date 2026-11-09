@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 import type {
   Database,
   MemberRole,
+  ProductKind,
+  ProductMediaKind,
+  ProductStatus,
   SubscriptionStatus,
 } from "@/lib/supabase/types";
 
@@ -25,6 +28,7 @@ const MIGRATIONS_DIR = fileURLToPath(
 const MIGRATION_FILES = [
   "20260101000000_accounts_and_companies.sql",
   "20260101000100_team_invitations.sql",
+  "20260101000200_products.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -33,21 +37,44 @@ function readMigration(name: string): string {
 
 const accountsSql = readMigration("20260101000000_accounts_and_companies.sql");
 const invitationSql = readMigration("20260101000100_team_invitations.sql");
-const allSql = [accountsSql, invitationSql].join("\n");
+const productsSql = readMigration("20260101000200_products.sql");
+const allSql = [accountsSql, invitationSql, productsSql].join("\n");
 
 type PublicSchema = Database["public"];
 type TableName = keyof PublicSchema["Tables"];
 
 /**
+ * The tables every deployment has: accounts, tenancy and billing state.
+ */
+const CORE_TABLES = [
+  "profiles",
+  "companies",
+  "company_members",
+] as const satisfies readonly TableName[];
+
+/**
+ * Tables the products section adds — the template's first domain module.
+ *
+ * They are listed separately because the distinction is the point: `CORE_TABLES`
+ * is what this template ships for everybody, and a module's tables arrive with
+ * the module.
+ */
+const MODULE_TABLES = [
+  "product_categories",
+  "products",
+  "product_media",
+  "product_dates",
+] as const satisfies readonly TableName[];
+
+/**
  * Every table the application expects to exist.
  *
- * The `satisfies` clause makes a typo a compile error, and `_TablesCovered`
+ * The `satisfies` clauses make a typo a compile error, and `_TablesCovered`
  * makes an omission a compile error too: if a table is added to
  * `lib/supabase/types.ts` and not listed here, that alias resolves to `never`
  * and `pnpm typecheck` fails.
  */
-const TABLES = ["profiles", "companies", "company_members"] as const satisfies
-  readonly TableName[];
+const TABLES = [...CORE_TABLES, ...MODULE_TABLES] as const;
 
 export type _TablesCovered = Exclude<
   TableName,
@@ -58,7 +85,7 @@ export type _TablesCovered = Exclude<
 
 describe("type definitions", () => {
   it("describes the three core tables", () => {
-    expect(TABLES).toHaveLength(3);
+    expect(CORE_TABLES).toHaveLength(3);
   });
 
   it("declares every table in a migration", () => {
@@ -70,9 +97,9 @@ describe("type definitions", () => {
     }
   });
 
-  it("ships no domain tables of its own", () => {
-    // The template is the base a feature module builds on: every table here is
-    // part of accounts, tenancy or billing state.
+  it("creates exactly the tables the types declare", () => {
+    // Nothing may exist in Postgres that `lib/supabase/types.ts` does not
+    // describe, and nothing may be described that the migrations do not create.
     const created = [
       ...allSql.matchAll(/create table if not exists public\.([a-z_]+) \(/g),
     ].map((match) => match[1]);
@@ -360,6 +387,145 @@ describe("invitation consent", () => {
   });
 });
 
+describe("products section", () => {
+  it("switches the section on with a column, not a table", () => {
+    expect(productsSql).toContain(
+      "add column if not exists enabled_sections text[] not null default '{}'::text[]",
+    );
+  });
+
+  it("asks the section predicate in every policy it declares", () => {
+    const policies = productsSql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies.length).toBeGreaterThanOrEqual(16);
+    for (const policy of policies) {
+      // Without this a switched-off section would still be readable: the
+      // switch has to be part of the policy, not just of the UI.
+      expect(policy).toContain("public.has_company_section(");
+    }
+  });
+
+  it("enables RLS on every table the section adds", () => {
+    for (const table of MODULE_TABLES) {
+      expect(productsSql).toContain(
+        `alter table public.${table} enable row level security;`,
+      );
+    }
+  });
+
+  it("defines the section predicate before the policies that call it", () => {
+    const helper = productsSql.indexOf(
+      "create or replace function public.has_company_section",
+    );
+    const firstPolicy = productsSql.indexOf("create policy");
+
+    expect(helper).toBeGreaterThan(-1);
+    expect(firstPolicy).toBeGreaterThan(helper);
+  });
+
+  it("revokes the new helpers from anonymous callers", () => {
+    // Supabase grants EXECUTE on new `public` functions to `anon` explicitly.
+    const helpers = [
+      "public.has_company_section(uuid, text)",
+      "public.storage_company_id(text)",
+    ];
+
+    for (const helper of helpers) {
+      expect(productsSql).toContain(
+        `revoke all on function ${helper} from public, anon;`,
+      );
+      expect(productsSql).toContain(
+        `grant execute on function ${helper} to authenticated, service_role;`,
+      );
+    }
+  });
+
+  it("keeps the variant-depth trigger away from client roles", () => {
+    expect(productsSql).toContain(
+      "create or replace function public.products_check_variant_depth()",
+    );
+    expect(productsSql).toContain(
+      "revoke all on function public.products_check_variant_depth() from public, anon, authenticated;",
+    );
+    expect(productsSql).toContain(
+      "grant execute on function public.products_check_variant_depth() to service_role;",
+    );
+  });
+
+  it("refuses nesting in both directions", () => {
+    // A `check` sees one row, so the depth rule is a trigger.
+    expect(productsSql).toContain(
+      "A product variant cannot itself have variants",
+    );
+    expect(productsSql).toContain(
+      "A product with variants cannot become a variant",
+    );
+    expect(productsSql).toContain("using errcode = 'check_violation'");
+  });
+
+  it("keys every child row on the tenant", () => {
+    // A composite foreign key can only point at a row of the same company, so a
+    // policy bug cannot leak one workspace's rows into another's.
+    expect(productsSql).toContain("unique (company_id, id)");
+    expect(productsSql).toContain("foreign key (company_id, parent_id)");
+    expect(productsSql).toContain("foreign key (company_id, category_id)");
+    expect(productsSql).toContain("foreign key (company_id, product_id)");
+    // Deleting a category leaves its products behind, uncategorised.
+    expect(productsSql).toContain("on delete set null (category_id)");
+  });
+
+  it("stores money in minor units", () => {
+    expect(productsSql).toContain(
+      "price_cents integer not null default 0 check (price_cents >= 0)",
+    );
+    expect(productsSql).toContain("currency text not null default 'usd'");
+    expect(productsSql).toContain("check (currency ~ '^[a-z]{3}$')");
+  });
+
+  it("bounds a booking window inside one row", () => {
+    expect(productsSql).toContain(
+      "constraint product_dates_range check (ends_on >= starts_on)",
+    );
+    expect(productsSql).toContain(
+      "unique (company_id, product_id, starts_on, ends_on)",
+    );
+  });
+
+  it("gives a gallery row exactly one source", () => {
+    expect(productsSql).toContain(
+      "check ((storage_path is null) <> (url is null))",
+    );
+  });
+
+  it("declares the bucket the app uploads to, with the same limits", () => {
+    // `lib/products.ts` repeats the size ceiling and the MIME list; these
+    // assertions are what keep the two in step.
+    expect(productsSql).toContain("'product-media'");
+    expect(productsSql).toContain("52428800");
+    expect(productsSql).toContain("'image/png'");
+    expect(productsSql).toContain("'video/mp4'");
+  });
+
+  it("reads the company out of the object path behind a guard", () => {
+    // The cast needs a regex in front of it, or an unrelated object name would
+    // fail the policy with a casting error instead of a clean refusal.
+    const definition = productsSql.match(
+      /create or replace function public\.storage_company_id[\s\S]*?\$\$;/,
+    )?.[0];
+
+    expect(definition).toBeDefined();
+    expect(definition).toContain("case");
+    expect(definition).toContain("::uuid");
+    expect(definition).toContain("split_part(object_name, '/', 1)");
+  });
+
+  it("is applied after the tenancy core it builds on", () => {
+    expect(MIGRATION_FILES.indexOf("20260101000200_products.sql")).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
+    );
+  });
+});
+
 describe("enum values", () => {
   /** Pulls the members out of `create type public.<name> as enum (...)`. */
   function enumValues(sql: string, name: string): string[] {
@@ -423,5 +589,28 @@ describe("enum values", () => {
       if (status === "none") continue;
       expect(mapped, `${status} is not mapped by mapStatus`).toContain(status);
     }
+  });
+
+  it("matches product_status", () => {
+    expect(enumValues(productsSql, "product_status")).toEqual([
+      "draft",
+      "active",
+      "archived",
+    ] satisfies ProductStatus[]);
+  });
+
+  it("matches product_kind", () => {
+    // Two stocking models: one number, or one row per window.
+    expect(enumValues(productsSql, "product_kind")).toEqual([
+      "item",
+      "dated",
+    ] satisfies ProductKind[]);
+  });
+
+  it("matches product_media_kind", () => {
+    expect(enumValues(productsSql, "product_media_kind")).toEqual([
+      "image",
+      "video",
+    ] satisfies ProductMediaKind[]);
   });
 });

@@ -26,7 +26,9 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: serverMock.createClient,
 }));
 
-const { updateCompany } = await import("@/lib/actions/settings");
+const { updateCompany, updateEnabledSections } = await import(
+  "@/lib/actions/settings"
+);
 
 describe("updateCompany", () => {
   beforeEach(() => cacheMock.revalidatePath.mockReset());
@@ -85,6 +87,85 @@ describe("updateCompany", () => {
     await captureRedirect(() =>
       updateCompany(formDataOf({ slug: "acme", name: "Acme Wellness" })),
     );
+
+    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme", "layout");
+  });
+});
+
+describe("updateEnabledSections", () => {
+  /** A checkbox group submits every ticked value under the same name. */
+  function sectionsForm(sections: string[]) {
+    const formData = new FormData();
+    formData.set("slug", "acme");
+    for (const section of sections) {
+      formData.append("section", section);
+    }
+    return formData;
+  }
+
+  it("denies a plain member", async () => {
+    tenantSetup(serverMock.createClient, {}, "member");
+
+    const url = await captureRedirect(() =>
+      updateEnabledSections(sectionsForm(["products"])),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
+  });
+
+  it("does not let a manager switch a section on", async () => {
+    tenantSetup(serverMock.createClient, {}, "manager");
+
+    const url = await captureRedirect(() =>
+      updateEnabledSections(sectionsForm(["products"])),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
+  });
+
+  it("writes the selection as an absolute list of known keys", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    await captureRedirect(() =>
+      updateEnabledSections(sectionsForm(["products", "services"])),
+    );
+
+    // `services` is not a section in this build, so it is dropped rather than
+    // stored as a key no policy will ever match.
+    expect(mock.argFor("companies", "update")).toEqual({
+      enabled_sections: ["products"],
+    });
+  });
+
+  it("clears the list when nothing is ticked", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() => updateEnabledSections(sectionsForm([])));
+
+    expect(mock.argFor("companies", "update")).toEqual({ enabled_sections: [] });
+    expect(redirectParams(url).get("ok")).toBe(
+      "Sections updated. All optional sections are off.",
+    );
+  });
+
+  it("names what was switched on", async () => {
+    tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateEnabledSections(sectionsForm(["products"])),
+    );
+
+    expect(redirectParams(url).get("ok")).toBe("Sections updated: Products.");
+  });
+
+  it("revalidates the tenant layout so the rail changes", async () => {
+    tenantSetup(serverMock.createClient);
+
+    await captureRedirect(() => updateEnabledSections(sectionsForm(["products"])));
 
     expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme", "layout");
   });

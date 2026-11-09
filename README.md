@@ -1,14 +1,17 @@
 # Platform
 
 A multi-tenant **base template** on Next.js 16 and Supabase: sign-in, per-workspace
-membership and roles, RLS-scoped data and Stripe billing, with no product domain
-attached. Everything a customer-facing app needs and nothing it has to delete
-first — see [Adding a new section](#adding-a-new-section) for the one recipe that
-matters.
+membership and roles, RLS-scoped data and Stripe billing, plus one worked domain
+module — an optional **products** section with categories, variants, stock,
+date-based inventory and a media gallery. Switch it off and you are back to the
+bare base; copy it for the next section (see
+[Adding a new section](#adding-a-new-section)) and delete nothing.
 
 Each company is a **tenant** addressed by a path segment: `/acme/dashboard`,
 `/acme/settings`. The tenant slug lives in Postgres, not in a hard-coded map, and
-every tenant-scoped table is protected by Row Level Security.
+every tenant-scoped table is protected by Row Level Security — including the
+section switch itself, which lives in `companies.enabled_sections` and is
+re-checked by every policy of the module it belongs to.
 
 ## Stack
 
@@ -71,8 +74,16 @@ pnpm dev
    `accept_company_invitations()`, `my_pending_invitations()` and
    `respond_to_company_invitation(uuid, boolean)`. A pending membership grants
    nothing until it is accepted.
+   `20260101000200_products.sql` adds the optional products section:
+   `companies.enabled_sections`, the `product_*` enums, `product_categories`,
+   `products` (variants are rows with `parent_id`), `product_media`,
+   `product_dates`, `has_company_section()`, the single-level variant trigger, a
+   policy per table per verb, and the public `product-media` bucket with its
+   storage policies. It needs PostgreSQL 15 or newer, for
+   `on delete set null (column)` — that is Supabase's baseline.
 
-   A feature module adds its own numbered migration; it never edits these two.
+   A feature module adds its own numbered migration; it never edits the ones
+   before it.
 
 3. Copy the project URL, publishable key and secret key into `.env.local`. The
    keys are on **Project Settings → API Keys**: `sb_publishable_…` goes in
@@ -225,12 +236,12 @@ event. Tests that cover that behaviour stub the values themselves.
 
 | Area            | Files                                                                          | Covers                                                                                                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pure helpers    | `tests/unit/`                                                                  | slug generation against the `companies.slug` CHECK regex, query-param and class-name helpers, post-login redirect validation, the five-role hierarchy and assignable-role rules, plan filtering/formatting and `/100` price parity with the rest of the app |
+| Pure helpers    | `tests/unit/`                                                                  | slug generation against the `companies.slug` CHECK regex, query-param and class-name helpers, post-login redirect validation, the five-role hierarchy and assignable-role rules, plan filtering/formatting and `/100` price parity with the rest of the app, the section registry and its switch, product handles/money/stock/variant grouping/date windows/media limits |
 | Config guards   | `tests/unit/{stripe,site,supabase-env,security-headers}.test.ts`                | lazy Stripe client, origin resolution behind proxy headers (including malformed `Host`/`X-Forwarded-Proto`), named missing-env errors, the response header set and its production-only HSTS |
 | Route handlers  | `tests/api/`                                                                   | Stripe webhook signature/secret checks, every status → enum mapping, idempotent replay, 5xx retry semantics, unmatched subscriptions, OAuth code exchange, email `token_hash` verification, open-redirect guards, invitation acceptance only for `type=invite` |
-| Server Actions  | `tests/actions/`                                                               | tenant resolution, role gates, pending invitation creation (and identical wording for both paths), accepting/declining an invitation, validation messages, plan validation against Stripe, Postgres error codes (`23503`, `23505`), checkout rollback |
+| Server Actions  | `tests/actions/`                                                               | tenant resolution, role gates, pending invitation creation (and identical wording for both paths), accepting/declining an invitation, validation messages, plan validation against Stripe, Postgres error codes (`23503`, `23505`), checkout rollback, product/category/variant/stock/date writes scoped by tenant, the section switch, gallery upload targets and path checks |
 | Routing         | `tests/integration/`                                                           | which paths require auth, cookie preservation across redirects, matcher exclusions            |
-| Schema          | `tests/db/schema.test.ts`                                                      | RLS enabled on every table, slug regex parity with the client, `anon` grant revocation, invitation columns/policies, accepted-only membership predicates, enum parity |
+| Schema          | `tests/db/schema.test.ts`                                                      | RLS enabled on every table, slug regex parity with the client, `anon` grant revocation, invitation columns/policies, accepted-only membership predicates, enum parity, the section predicate in every products policy, tenant-keyed foreign keys, the single-level variant trigger and the bucket limits |
 
 `tests/helpers/` holds a thenable Supabase query-builder mock that records every
 chained call, so assertions can check the filters that were applied
@@ -263,9 +274,11 @@ Tests must pass before anything deploys:
    re-reads the subscription from Stripe on the billing page and on a dashboard
    visit whose stored status has not settled, so a missed webhook cannot leave a
    paying company looking unpaid.
-4. `/{slug}/dashboard` is the workspace. The rail carries only the dashboard
-   until you add a section; settings and billing live in the account menu at the
-   foot of it, and both are owner/admin-only — a manager or viewer sees neither.
+4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
+   optional sections the workspace has switched on; **Products** is off until an
+   owner or admin enables it on `/{slug}/settings` → Sections. Settings and
+   billing live in the account menu at the foot of the rail, and both are
+   owner/admin-only — a manager or viewer sees neither.
 
 ## Team roles and invitations
 
@@ -276,11 +289,13 @@ invited explicitly.
 | Task                                | Owner | Admin | Manager | Staff | Viewer |
 | ----------------------------------- | :---: | :---: | :-----: | :---: | :----: |
 | Read every workspace page           |  yes  |  yes  |   yes   |  yes  |  yes   |
+| Write in the products section       |  yes  |  yes  |   yes   |   —   |   —    |
+| Switch sections on and off          |  yes  |  yes  |    —    |   —   |   —    |
 | Billing and company details         |  yes  |  yes  |    —    |   —   |   —    |
 | Invite, re-role and remove the team |  yes  |  yes  |    —    |   —   |   —    |
 
-`manager` and `staff` own no screens in this template: they exist so a feature
-module can gate its own writes without inventing a role model. Gate the UI with
+`manager` is the write tier the products section uses; `staff` reads it and can
+be given front-line writes by a module that knows what those are. Gate the UI with
 `canManage`/`canFrontDesk` and mirror the same role lists in the RLS policy — the
 two are cheap to keep in step and expensive to drift.
 
@@ -316,6 +331,87 @@ That badge means "Supabase accepted the send request" and "the person has
 accepted", not "the email was delivered". Delivery confirmation would need an
 email-provider webhook; the app deliberately does not pretend to have one.
 
+## The products section
+
+`app/[tenant]/products/` is the template's first domain module and the worked
+example of a *switchable* section. It is off until an owner or admin turns it on
+under **Settings → Sections**; while it is off its routes `notFound()` and every
+policy refuses the rows, so it behaves like a part of the app that does not
+exist for that workspace. Switching it back on brings the same rows back —
+nothing is deleted, ever.
+
+### What it stores
+
+| Table                | Holds                                                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `product_categories` | Flat aisles, ordered by `position`, unique per `(company_id, handle)`                                                        |
+| `products`           | The sellable rows: price, SKU, supplier, status and stock — **and variants**, which are rows with `parent_id` set            |
+| `product_media`      | The gallery: one row per image or video, from the bucket (`storage_path`) or a link elsewhere (`url`), never both            |
+| `product_dates`      | Date-based inventory: one row per bookable window with its own stock and optional price override                             |
+
+Three decisions are worth explaining, because they shape everything else:
+
+- **A variant is a row, not a child table.** Price, SKU, stock and gallery then
+  work identically whether or not a product has variants, and
+  `groupVariants()` in `lib/products.ts` only groups them for display. One level
+  is allowed and a trigger enforces it in both directions: a variant cannot have
+  variants, and a product with variants cannot become one.
+- **Stock is either one number or one row per window.** `products.kind` picks
+  the model: `item` counts `inventory_quantity`, `dated` books
+  `product_dates`. The product page renders exactly one of the two cards, so the
+  two can never disagree about the same product.
+- **Money is stored in the currency's minor unit** (`price_cents`), the same
+  convention as `lib/plans.ts`, and formatted through `formatPlanPrice` so the
+  catalogue and the billing page print prices the same way.
+
+Every child row is keyed on `(company_id, …)` rather than on an id alone:
+`foreign key (company_id, product_id) references products (company_id, id)`. A
+row therefore cannot point at another tenant's row even if a policy were wrong,
+because the key itself refuses it. Deleting a category leaves its products
+behind, uncategorised (`on delete set null (category_id)`); deleting a product
+cascades to its variants, dates and gallery rows.
+
+### Who may do what
+
+- **Read**: any accepted member (`member` and up) — the catalogue is shop
+  information, not confidential.
+- **Write**: owner, admin and manager. `staff` and `member` are read-only here;
+  a front-desk tier that may adjust stock is a module decision, and
+  `has_company_role` in migration 03 is where it would change.
+
+### Gallery media
+
+Uploads go **from the browser straight to Storage** with a signed upload URL
+(`createMediaUploadUrl` → `uploadToSignedUrl` → `recordMediaUpload`). A Server
+Action would have to carry the file, and those are capped at 1 MB by default and
+at a few megabytes by the platform in front of them — far too small for a phone
+video.
+
+- The bucket is `product-media`, public, 50 MB per object, and accepts PNG,
+  JPEG, WebP, AVIF, MP4 and WebM. Public because a storefront renders these URLs
+  for visitors without a session; a signed *read* URL would expire out from under
+  it.
+- Objects live at `<company>/<product>/<uuid>.<ext>`. The storage policies read
+  the first segment back through `storage_company_id()` and then ask
+  `has_company_role` and `has_company_section` — so writes are gated per tenant
+  even though reads are not.
+- `lib/products.ts` repeats the MIME list and the size ceiling, and
+  `tests/db/schema.test.ts` asserts the two against the bucket declaration.
+
+### Reading it from a website
+
+A storefront needs no session and no API route of its own:
+
+- rows: `https://<project>.supabase.co/rest/v1/products?select=*,product_media(*)&company_id=eq.<id>&status=eq.active`
+  with the publishable key — RLS still applies, so the query only works for a
+  member. For a public catalogue, serve it from a Server Component or route
+  handler that uses `createAdminClient()` and filters on `status = 'active'`
+  (never add a `to anon` policy: `tests/db/schema.test.ts` fails the build if
+  one appears anywhere).
+- media: `.../storage/v1/object/public/product-media/<path>`.
+- everything else a shop needs that has no column yet: `products.metadata`
+  (`jsonb`), which a module can extend without a migration.
+
 ## Security
 
 ### Authorization is four layers, all server-side
@@ -348,6 +444,20 @@ which is request-scoped.
   sees through their accepted membership.
 - **Owner and admin rows cannot be created or changed from a client session.**
   The membership policies admit `manager`, `staff` and `member` only.
+- **A switched-off section grants nothing.** Every policy in the products module
+  also asks `has_company_section(company_id, 'products')`, a `SECURITY DEFINER`
+  helper that reads `companies.enabled_sections` and is revoked from `anon`. The
+  switch is data, not code: flipping it off hides rows and keeps them.
+- **A product variant is one level deep.** `products.parent_id` is a
+  self-reference, and `products_check_variant_depth()` refuses a variant of a
+  variant — and a product that has variants becoming one — in both directions.
+- **A child row cannot point outside its tenant.** Every child key is composite
+  (`(company_id, product_id)`, `(company_id, category_id)`,
+  `(company_id, parent_id)`), so a row can only reference a parent of the same
+  company. That holds even if a policy were written wrongly.
+- **Money is a non-negative integer in minor units.** `price_cents`,
+  `compare_at_price_cents` and `product_dates.price_cents` are `integer` with
+  `check (>= 0)`, and `currency` is a three-letter lowercase code.
 
 ### Headers
 
@@ -409,6 +519,17 @@ breaks every other project on the same port.
   Rows that should not be there can be removed with `removeMember` (or deleted
   directly); they are not repaired automatically, because guessing which ones
   were solicited is not something a migration can do.
+- **Deleting a product leaves its uploaded objects in Storage.** The rows cascade
+  (variants, dates, gallery), and removing a single gallery item does delete its
+  object, but a product delete can only remove rows through the API — Storage has
+  no cascading delete from Postgres. The objects stay reachable by URL until a
+  housekeeping job sweeps paths with no `product_media` row. The bucket is public
+  by design, so treat "delete the product" as "unlist it", not "erase it".
+- **A public bucket is a decision, not an oversight.** Storefronts render these
+  URLs without a session, so `product-media` is public and reads are not gated by
+  RLS. Writes are. If a deployment needs gated media, make the bucket private and
+  hand the storefront a signed read URL from the server — `product_media` already
+  stores everything that requires.
 - **`getOrigin()` validates, it does not allowlist.** The `Host` and
   `X-Forwarded-Host` headers are restricted to `hostname[:port]` characters and
   `X-Forwarded-Proto` to `http`/`https`, so a malformed value can no longer reach
@@ -433,6 +554,21 @@ breaks every other project on the same port.
   `canAdminister`/`canManage`/`canFrontDesk` predicates. It is framework-free so
   the sidebar, pages and Server Actions share one hierarchy; Postgres RLS is the
   final authority, not these helpers.
+- **`lib/features.ts`** is the section registry: `SECTION_KEYS`, the labels and
+  paths the rail and Settings render, and `isSectionEnabled`. The stored switch is
+  `companies.enabled_sections` (`text[]`), which an owner or admin edits on
+  Settings → Sections. The database repeats that check in
+  `has_company_section()`, so the helper decides what the UI *offers* and RLS
+  decides what is *reachable*. Adding a section is one entry here plus its routes
+  and policies; nothing else enumerates sections. Tier gating, when it comes,
+  belongs in `isSectionEnabled` **and** in `has_company_section`, never in the UI
+  alone.
+- **`lib/products.ts`** holds the catalogue rules the forms, actions and tests
+  share — handle validation, money parsing and formatting, stock labels, variant
+  grouping, date windows and the media MIME list. It is client-safe because the
+  gallery uploader is a Client Component. `productHandleProblem` wraps
+  `categoryHandleProblem` and adds the section's own route words (`new`,
+  `categories`) to the reserved list, so a product can never sit on a page URL.
 - **`lib/supabase/admin.ts`** is the only place the secret key is used. It is
   `server-only` and bypasses RLS, so it is reserved for provisioning a company,
   inviting a user (`inviteUserByEmail`), and reconciling Stripe webhooks. Key resolution lives in `lib/supabase/env.ts`
@@ -481,13 +617,19 @@ app/
   [tenant]/
     layout.tsx                   # icon rail shell + account menu
     page.tsx                     # redirects to the dashboard
-    dashboard/                   # the empty workspace
-    settings/                    # company + team cards
+    dashboard/                   # the workspace overview
+    products/                    # products section (categories, variants, stock, gallery)
+    products/new/                # create a product
+    products/[handle]/           # details, stock, dates, variants, gallery
+    products/categories/         # aisle management
+    settings/                    # company + sections + team cards
     settings/billing/            # plan, portal, invoices
 components/
   tenant/{sidebar-nav,tenant-sidebar,user-menu,page-header}.tsx
 lib/
   auth.ts                        # session + tenancy data access layer
+  features.ts                    # optional-section registry + switch (client-safe)
+  products.ts                    # catalogue rules, money, stock and media (client-safe)
   roles.ts                       # labels + authorization predicates (client-safe)
   safe-redirect.ts               # post-login `next` validation (client-safe)
   billing/{checkout,sync}.ts     # Checkout payloads + subscription reconciliation
@@ -496,15 +638,15 @@ lib/
   site.ts                        # request origin (validated Host + configured URL)
   subscriptions.ts               # plan catalogue, read from Stripe
   supabase/{client,server,admin,proxy,env,env.server}.ts
-  actions/{auth,billing,company,members,settings,support}.ts
-supabase/migrations/             # schema + RLS (two files)
+  actions/{auth,billing,company,members,products,settings,support}.ts
+supabase/migrations/             # schema + RLS (three files)
 tests/                           # unit, actions, api, integration, db
 ```
 
 ## Adding a new section
 
-The template has no domain, so "adding a section" is the normal way to build on
-it. Say the section is called `orders`. Six files, in this order — each step ends
+The products module is the worked example, so copy it when you add the next one.
+Say the new section is called `orders`. Six steps, in this order — each step ends
 with something runnable:
 
 1. **Schema** — `supabase/migrations/<timestamp>_orders.sql`. Copy the shape of
@@ -542,15 +684,22 @@ with something runnable:
      re-deriving membership: those helpers are the ones that ignore pending
      invitations.
 
+   A fourth rule applies if the section is optional: add
+   `public.has_company_section(company_id, 'orders')` to **every** policy as
+   well. Migration 03 does this throughout, and the switch then hides rows
+   instead of deleting them. `tests/db/schema.test.ts` fails if any policy in a
+   module migration forgets it.
+
    If one of your tables references another, key the reference on the tenant as
    well — `foreign key (company_id, customer_id) references ... (company_id, id)`
    — or a member of one company can point a row at another company's row.
    A policy only checks the row being written.
 
 2. **Types** — add the table to `lib/supabase/types.ts` (`Row`, `Insert`,
-   `Update`, `Relationships: []`) and to `TABLES` in `tests/db/schema.test.ts`.
-   That array is `satisfies readonly TableName[]`, so the compiler tells you if
-   the two disagree.
+   `Update`, `Relationships: []`) and to `MODULE_TABLES` in
+   `tests/db/schema.test.ts` — a module's tables go there, `CORE_TABLES` is what
+   every deployment ships. Both arrays are `satisfies readonly TableName[]`, so
+   the compiler tells you if the two disagree.
 
 3. **Action** — `lib/actions/orders.ts`:
 
@@ -558,13 +707,14 @@ with something runnable:
    "use server";
 
    import {
-     getActionContext, readField, redirectWith, requireManager,
+     getActionContext, readField, redirectWith, requireManager, requireSection,
    } from "@/lib/actions/support";
 
    export async function createOrder(formData: FormData) {
      const slug = readField(formData, "slug");
      const context = await getActionContext(slug);
      requireManager(context, slug); // the UI gate, repeated server-side
+     requireSection(context, slug, "orders"); // and the section switch
 
      const { error } = await context.supabase.from("orders").insert({
        company_id: context.company.id,
@@ -587,12 +737,18 @@ with something runnable:
    `getTenantContext` reads cookies. Read `PageProps<"/[tenant]/orders">` — the
    route types are generated, so the string is checked.
 
-5. **Navigation** — add the entry to `items` in
-   `components/tenant/sidebar-nav.tsx`. The active state is derived from the
-   pathname, so there is nothing else to wire.
+5. **Navigation and the switch** — add the key to `SECTION_KEYS` in
+   `lib/features.ts` with a label, a path and a one-line description, then add an
+   icon to `SECTION_ICONS` in `components/tenant/sidebar-nav.tsx`. The rail, the
+   Settings → Sections checklist, the redirect target and the active state all
+   follow from those two lists. Gate the page with
+   `isSectionEnabled(company, "orders")` and `notFound()` when it is off, exactly
+   as `app/[tenant]/products/page.tsx` does.
 
-6. **Tests** — `tests/actions/orders.test.ts` (mock `@/lib/supabase/server` with
-   `tests/helpers/supabase.ts`) and a `describe` in `tests/db/schema.test.ts`
-   that pins the policies you wrote. Run `pnpm verify`.
+6. **Tests** — `tests/unit/orders.test.ts` for the pure rules,
+   `tests/actions/orders.test.ts` (mock `@/lib/supabase/server` with
+   `tests/helpers/supabase.ts`; pass `{ sections: ["orders"] }` to `tenantSetup`)
+   and a `describe` in `tests/db/schema.test.ts` that pins the policies you wrote.
+   Run `pnpm verify`.
 
 
