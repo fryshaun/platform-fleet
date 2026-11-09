@@ -18,7 +18,7 @@ import {
   type ProductCategory,
 } from "@/lib/products";
 
-import { SELECT_CLASSES, TEXTAREA_CLASSES } from "./fields";
+import { SELECT_CLASSES, TEXTAREA_CLASSES } from "../fields";
 
 /**
  * The product editor, used for both "new" and "edit".

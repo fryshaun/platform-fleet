@@ -60,6 +60,29 @@ export function productRow(
   };
 }
 
+/** A unit in the fixture workspace, for the assets section's tests. */
+export const ASSET_ID = "33333333-3333-4333-8333-333333333333";
+
+export function assetRow(
+  overrides: Partial<Tables<"assets">> = {},
+): Tables<"assets"> {
+  return {
+    id: ASSET_ID,
+    company_id: COMPANY_ID,
+    product_id: null,
+    name: "bike-1",
+    handle: "bike-1",
+    serial: null,
+    status: "available",
+    status_changed_at: "2026-01-01T00:00:00.000Z",
+    notes: null,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 /**
  * A plan as the catalogue hands it to the checkout actions.
  *

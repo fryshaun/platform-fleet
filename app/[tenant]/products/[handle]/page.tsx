@@ -31,6 +31,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import { ProductStatusBadge, StockBadge } from "../product-badges";
 import { ProductForm } from "../product-form";
+import { AssetsSection } from "./assets-section";
 import { DatesSection } from "./dates-section";
 import { GallerySection } from "./gallery-section";
 import { InventorySection } from "./inventory-section";
@@ -133,6 +134,20 @@ async function ProductContent({
     (categories ?? []).find((category) => category.id === product.category_id)
       ?.name ?? null;
 
+  // The assets section is optional and independent: when it is off this query is
+  // never made, and the card below is never rendered.
+  const assetsEnabled = isSectionEnabled(company, "assets");
+  const assetRows = assetsEnabled
+    ? (
+        await supabase
+          .from("assets")
+          .select("*")
+          .eq("company_id", company.id)
+          .eq("product_id", product.id)
+          .order("name", { ascending: true })
+      ).data ?? []
+    : [];
+
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6 lg:p-10">
       <PageHeader
@@ -183,6 +198,10 @@ async function ProductContent({
         product={product}
         canEdit={canEdit}
       />
+
+      {assetsEnabled ? (
+        <AssetsSection slug={company.slug} assets={assetRows} />
+      ) : null}
 
       <DatesSection
         slug={company.slug}

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type {
+  AssetStatus,
   Database,
   MemberRole,
   ProductKind,
@@ -29,6 +30,7 @@ const MIGRATION_FILES = [
   "20260101000000_accounts_and_companies.sql",
   "20260101000100_team_invitations.sql",
   "20260101000200_products.sql",
+  "20260101000300_assets.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -38,7 +40,8 @@ function readMigration(name: string): string {
 const accountsSql = readMigration("20260101000000_accounts_and_companies.sql");
 const invitationSql = readMigration("20260101000100_team_invitations.sql");
 const productsSql = readMigration("20260101000200_products.sql");
-const allSql = [accountsSql, invitationSql, productsSql].join("\n");
+const assetsSql = readMigration("20260101000300_assets.sql");
+const allSql = [accountsSql, invitationSql, productsSql, assetsSql].join("\n");
 
 type PublicSchema = Database["public"];
 type TableName = keyof PublicSchema["Tables"];
@@ -53,18 +56,25 @@ const CORE_TABLES = [
 ] as const satisfies readonly TableName[];
 
 /**
- * Tables the products section adds — the template's first domain module.
+ * Tables the optional modules add. They are listed separately because the
+ * distinction is the point: `CORE_TABLES` is what this template ships for
+ * everybody, and a module's tables arrive with the module.
  *
- * They are listed separately because the distinction is the point: `CORE_TABLES`
- * is what this template ships for everybody, and a module's tables arrive with
- * the module.
+ * The two module groups are kept apart so each migration can be asserted on its
+ * own — a table may only be created by the migration that owns it.
  */
-const MODULE_TABLES = [
+const PRODUCT_TABLES = [
   "product_categories",
   "products",
   "product_media",
   "product_dates",
 ] as const satisfies readonly TableName[];
+
+/** Tables the second module adds. A workspace that never switches the assets
+ * section on never reads a row of it. */
+const ASSET_TABLES = ["assets"] as const satisfies readonly TableName[];
+
+const MODULE_TABLES = [...PRODUCT_TABLES, ...ASSET_TABLES] as const;
 
 /**
  * Every table the application expects to exist.
@@ -406,7 +416,7 @@ describe("products section", () => {
   });
 
   it("enables RLS on every table the section adds", () => {
-    for (const table of MODULE_TABLES) {
+    for (const table of PRODUCT_TABLES) {
       expect(productsSql).toContain(
         `alter table public.${table} enable row level security;`,
       );
@@ -526,6 +536,116 @@ describe("products section", () => {
   });
 });
 
+describe("assets section", () => {
+  it("asks the section predicate in every policy it declares", () => {
+    const policies = assetsSql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies).toHaveLength(4);
+    for (const policy of policies) {
+      expect(policy).toContain(
+        "public.has_company_section(company_id, 'assets')",
+      );
+    }
+  });
+
+  it("never asks about another section's switch", () => {
+    // The two sections are independent: a workspace may keep a fleet with the
+    // catalogue switched off, so no assets policy may test the products key.
+    expect(assetsSql).not.toContain("'products'");
+  });
+
+  it("lets staff take a unit out of action but not create or remove one", () => {
+    const update = assetsSql.match(
+      /create policy "assets_update_frontdesk"[\s\S]*?;/,
+    )?.[0];
+
+    // The front desk owns availability, and that is the only write it owns.
+    expect(update).toContain("'staff'");
+
+    for (const name of ["assets_insert_manager", "assets_delete_manager"]) {
+      const definition = assetsSql.match(
+        new RegExp(`create policy "${name}"[\\s\\S]*?;`),
+      )?.[0];
+
+      expect(definition).toBeDefined();
+      expect(definition).toContain("array['owner', 'admin', 'manager']");
+      expect(definition).not.toContain("'staff'");
+    }
+  });
+
+  it("gives readers the member predicate", () => {
+    const select = assetsSql.match(
+      /create policy "assets_select_member"[\s\S]*?;/,
+    )?.[0];
+
+    expect(select).toContain("public.is_company_member(company_id)");
+  });
+
+  it("keys the unit on its tenant and its product", () => {
+    // A composite foreign key can only point at a row of the same company, so a
+    // policy bug cannot attach one workspace's unit to another's product.
+    expect(assetsSql).toContain("unique (company_id, handle)");
+    expect(assetsSql).toContain("unique (company_id, id)");
+    expect(assetsSql).toContain("foreign key (company_id, product_id)");
+  });
+
+  it("unassigns units when a product is deleted instead of deleting them", () => {
+    // A physical bike does not stop existing because a catalogue row went away.
+    expect(assetsSql).toContain("on delete set null (product_id)");
+    expect(assetsSql).toMatch(/product_id uuid,/);
+    expect(assetsSql).not.toMatch(/product_id uuid not null/);
+  });
+
+  it("stores availability as a status, never as a count", () => {
+    // Product stock is a number the shop edits; a fleet is rows the UI counts.
+    // Copying one into the other is exactly the drift this table avoids, so the
+    // word may appear in the notes above but never as a column.
+    expect(assetsSql).not.toMatch(/^\s*inventory_quantity/m);
+    expect(assetsSql).toContain(
+      "status public.asset_status not null default 'available'",
+    );
+    expect(assetsSql).toContain(
+      "create index if not exists assets_company_status_idx",
+    );
+  });
+
+  it("enables RLS on the table it adds", () => {
+    for (const table of ASSET_TABLES) {
+      expect(assetsSql).toContain(
+        `alter table public.${table} enable row level security;`,
+      );
+    }
+  });
+
+  it("keeps status_changed_at from drifting", () => {
+    expect(assetsSql).toContain(
+      "create or replace function public.assets_stamp_status_change()",
+    );
+    expect(assetsSql).toContain("new.status is distinct from old.status");
+    // Trigger-only, like the other helpers: no client role may execute it.
+    expect(assetsSql).toContain(
+      "revoke all on function public.assets_stamp_status_change() from public, anon, authenticated;",
+    );
+    expect(assetsSql).toContain(
+      "grant execute on function public.assets_stamp_status_change() to service_role;",
+    );
+  });
+
+  it("keeps one serial number per unit inside a fleet", () => {
+    expect(assetsSql).toContain(
+      "create unique index if not exists assets_serial_idx",
+    );
+    expect(assetsSql).toContain("lower(serial)");
+    expect(assetsSql).toMatch(/where serial is not null;/);
+  });
+
+  it("is applied after the modules it builds on", () => {
+    expect(MIGRATION_FILES.indexOf("20260101000300_assets.sql")).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000200_products.sql"),
+    );
+  });
+});
+
 describe("enum values", () => {
   /** Pulls the members out of `create type public.<name> as enum (...)`. */
   function enumValues(sql: string, name: string): string[] {
@@ -612,5 +732,15 @@ describe("enum values", () => {
       "image",
       "video",
     ] satisfies ProductMediaKind[]);
+  });
+
+  it("matches asset_status", () => {
+    // Complete on creation: PostgreSQL will not let the same transaction use a
+    // value it has just added, so a status added later costs a migration.
+    expect(enumValues(assetsSql, "asset_status")).toEqual([
+      "available",
+      "maintenance",
+      "retired",
+    ] satisfies AssetStatus[]);
   });
 });
