@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Fails the build on a high-severity advisory in the dependency tree.
+      # Nothing else in CI looks at the registry, so without this a vulnerable
+      # transitive dependency only surfaces when somebody happens to run it
+      # locally.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The suite is self-contained: every Supabase, Stripe and Next.js call is
+      # mocked, so it needs no secrets and no network. That is deliberate, so a
+      # pull request from a fork can still run the full gate.
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
