@@ -56,12 +56,33 @@ export type SupabaseMockOptions = {
   tables?: Record<string, TableHandler>;
   /** Overrides merged onto the default `auth` stub. */
   auth?: Record<string, unknown>;
+  /** Overrides for the bucket methods, keyed by bucket id. */
+  storage?: Record<string, StorageBucketOverrides>;
 };
+
+/**
+ * The slice of `supabase.storage.from(bucket)` the app uses.
+ *
+ * Only the three methods the products module calls are modelled; they resolve
+ * successfully by default so a test only has to describe the failure it cares
+ * about.
+ */
+export type StorageBucketStub = {
+  createSignedUploadUrl: (path: string) => Promise<{
+    data: { path: string; token: string } | null;
+    error: DbError | null;
+  }>;
+  remove: (paths: string[]) => Promise<{ data: unknown; error: DbError | null }>;
+  getPublicUrl: (path: string) => { data: { publicUrl: string } };
+};
+
+export type StorageBucketOverrides = Partial<StorageBucketStub>;
 
 export type SupabaseMock = {
   client: {
     from: (table: string) => unknown;
     auth: Record<string, unknown>;
+    storage: { from: (bucket: string) => StorageBucketStub };
   };
   /** Every chain started by `from(table)`, in order. */
   chainsFor: (table: string) => Call[][];
@@ -100,6 +121,28 @@ export function createSupabaseMock(
         () => (handler ? handler(calls, history) : EMPTY_RESULT),
         calls,
       );
+    },
+    storage: {
+      from(bucket: string): StorageBucketStub {
+        const overrides = options.storage?.[bucket] ?? {};
+
+        return {
+          createSignedUploadUrl:
+            overrides.createSignedUploadUrl ??
+            (async (path: string) => ({
+              data: { path, token: "test-upload-token" },
+              error: null,
+            })),
+          remove:
+            overrides.remove ??
+            (async (paths: string[]) => ({ data: paths, error: null })),
+          getPublicUrl:
+            overrides.getPublicUrl ??
+            ((path: string) => ({
+              data: { publicUrl: `https://storage.test/${bucket}/${path}` },
+            })),
+        };
+      },
     },
     auth: {
       getUser: vi.fn(async () => ({ data: { user: null }, error: null })),

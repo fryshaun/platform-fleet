@@ -26,6 +26,18 @@ export type SubscriptionStatus =
   | "unpaid"
   | "paused";
 
+export type ProductStatus = "draft" | "active" | "archived";
+
+/**
+ * How a product is stocked.
+ *
+ * `item` counts one number (`inventory_quantity`); `dated` books rows in
+ * `product_dates`, one per window.
+ */
+export type ProductKind = "item" | "dated";
+
+export type ProductMediaKind = "image" | "video";
+
 export type Database = {
   public: {
     Tables: {
@@ -65,6 +77,7 @@ export type Database = {
           stripe_subscription_id: string | null;
           subscription_status: SubscriptionStatus;
           trial_ends_at: string | null;
+          enabled_sections: string[];
           created_at: string;
           updated_at: string;
         };
@@ -76,6 +89,7 @@ export type Database = {
           stripe_subscription_id?: string | null;
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
+          enabled_sections?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -87,6 +101,7 @@ export type Database = {
           stripe_subscription_id?: string | null;
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
+          enabled_sections?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -119,6 +134,177 @@ export type Database = {
           invited_at?: string | null;
           accepted_at?: string | null;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      product_categories: {
+        Row: {
+          id: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          description: string | null;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          description?: string | null;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          name?: string;
+          handle?: string;
+          description?: string | null;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      products: {
+        Row: {
+          id: string;
+          company_id: string;
+          parent_id: string | null;
+          category_id: string | null;
+          title: string;
+          handle: string;
+          description: string | null;
+          status: ProductStatus;
+          kind: ProductKind;
+          sku: string | null;
+          supplier: string | null;
+          price_cents: number;
+          currency: string;
+          compare_at_price_cents: number | null;
+          track_inventory: boolean;
+          inventory_quantity: number | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          parent_id?: string | null;
+          category_id?: string | null;
+          title: string;
+          handle: string;
+          description?: string | null;
+          status?: ProductStatus;
+          kind?: ProductKind;
+          sku?: string | null;
+          supplier?: string | null;
+          price_cents?: number;
+          currency?: string;
+          compare_at_price_cents?: number | null;
+          track_inventory?: boolean;
+          inventory_quantity?: number | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          parent_id?: string | null;
+          category_id?: string | null;
+          title?: string;
+          handle?: string;
+          description?: string | null;
+          status?: ProductStatus;
+          kind?: ProductKind;
+          sku?: string | null;
+          supplier?: string | null;
+          price_cents?: number;
+          currency?: string;
+          compare_at_price_cents?: number | null;
+          track_inventory?: boolean;
+          inventory_quantity?: number | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      product_media: {
+        Row: {
+          id: string;
+          company_id: string;
+          product_id: string;
+          kind: ProductMediaKind;
+          storage_path: string | null;
+          url: string | null;
+          alt: string | null;
+          position: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          product_id: string;
+          kind?: ProductMediaKind;
+          storage_path?: string | null;
+          url?: string | null;
+          alt?: string | null;
+          position?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          product_id?: string;
+          kind?: ProductMediaKind;
+          storage_path?: string | null;
+          url?: string | null;
+          alt?: string | null;
+          position?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      product_dates: {
+        Row: {
+          id: string;
+          company_id: string;
+          product_id: string;
+          starts_on: string;
+          ends_on: string;
+          inventory_quantity: number;
+          price_cents: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          product_id: string;
+          starts_on: string;
+          ends_on: string;
+          inventory_quantity?: number;
+          price_cents?: number | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          product_id?: string;
+          starts_on?: string;
+          ends_on?: string;
+          inventory_quantity?: number;
+          price_cents?: number | null;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -160,10 +346,21 @@ export type Database = {
         Args: { target_membership_id: string; accept: boolean };
         Returns: boolean;
       };
+      has_company_section: {
+        Args: { target_company_id: string; section: string };
+        Returns: boolean;
+      };
+      storage_company_id: {
+        Args: { object_name: string };
+        Returns: string | null;
+      };
     };
     Enums: {
       member_role: MemberRole;
       subscription_status: SubscriptionStatus;
+      product_status: ProductStatus;
+      product_kind: ProductKind;
+      product_media_kind: ProductMediaKind;
     };
     CompositeTypes: { [_ in never]: never };
   };

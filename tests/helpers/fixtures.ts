@@ -20,6 +20,7 @@ export function companyRow(
     stripe_subscription_id: null,
     subscription_status: "none",
     trial_ends_at: null,
+    enabled_sections: [],
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -28,6 +29,36 @@ export function companyRow(
 
 /** The price id the checkout tests treat as the plan the customer picked. */
 export const PLAN_PRICE_ID = "price_pro_monthly";
+
+/** A product in the fixture workspace, for the section's tests. */
+export const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+
+export function productRow(
+  overrides: Partial<Tables<"products">> = {},
+): Tables<"products"> {
+  return {
+    id: PRODUCT_ID,
+    company_id: COMPANY_ID,
+    parent_id: null,
+    category_id: null,
+    title: "Espresso beans",
+    handle: "espresso-beans",
+    description: null,
+    status: "active",
+    kind: "item",
+    sku: null,
+    supplier: null,
+    price_cents: 1800,
+    currency: "usd",
+    compare_at_price_cents: null,
+    track_inventory: true,
+    inventory_quantity: 12,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 /**
  * A plan as the catalogue hands it to the checkout actions.

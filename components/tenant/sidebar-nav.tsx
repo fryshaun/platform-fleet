@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboardIcon } from "lucide-react";
+import { LayoutDashboardIcon, PackageIcon } from "lucide-react";
 
 import {
   Tooltip,
@@ -10,6 +10,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { SECTIONS, type SectionKey } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -18,15 +19,28 @@ type NavItem = {
   icon: typeof LayoutDashboardIcon;
 };
 
+/** One icon per section; the labels and paths come from `lib/features.ts`. */
+const SECTION_ICONS: Record<SectionKey, typeof LayoutDashboardIcon> = {
+  products: PackageIcon,
+};
+
 /**
  * Primary navigation for a tenant.
  *
- * Each section is a folder under `app/[tenant]/`: add it to `items` and it
- * appears in the rail with the active state already wired up. Settings and
- * billing are deliberately absent: both are admin-only and visited rarely, so
- * they live in the account menu instead of holding a permanent slot here.
+ * Each section is a folder under `app/[tenant]/`: add it to `SECTION_KEYS` and it
+ * appears in the rail with the active state already wired up — the caller
+ * decides *which* sections a workspace gets, this component only renders them.
+ * Settings and billing are deliberately absent: both are admin-only and visited
+ * rarely, so they live in the account menu instead of holding a permanent slot
+ * here.
  */
-export function SidebarNav({ tenantSlug }: { tenantSlug: string }) {
+export function SidebarNav({
+  tenantSlug,
+  sections,
+}: {
+  tenantSlug: string;
+  sections: readonly SectionKey[];
+}) {
   const pathname = usePathname();
 
   const items: NavItem[] = [
@@ -35,6 +49,11 @@ export function SidebarNav({ tenantSlug }: { tenantSlug: string }) {
       label: "Dashboard",
       icon: LayoutDashboardIcon,
     },
+    ...sections.map((key) => ({
+      href: `/${tenantSlug}/${SECTIONS[key].path}`,
+      label: SECTIONS[key].label,
+      icon: SECTION_ICONS[key],
+    })),
   ];
 
   return (
