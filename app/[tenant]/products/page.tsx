@@ -27,7 +27,7 @@ import { canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
-import { SELECT_CLASSES } from "./fields";
+import { SELECT_CLASSES } from "../fields";
 import { ProductStatusBadge, StockBadge } from "./product-badges";
 
 export const metadata: Metadata = {

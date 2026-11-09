@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboardIcon, PackageIcon } from "lucide-react";
+import {
+  BoxesIcon,
+  LayoutDashboardIcon,
+  PackageIcon,
+} from "lucide-react";
 
 import {
   Tooltip,
@@ -22,6 +26,7 @@ type NavItem = {
 /** One icon per section; the labels and paths come from `lib/features.ts`. */
 const SECTION_ICONS: Record<SectionKey, typeof LayoutDashboardIcon> = {
   products: PackageIcon,
+  assets: BoxesIcon,
 };
 
 /**

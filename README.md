@@ -1,10 +1,11 @@
 # Platform
 
 A multi-tenant **base template** on Next.js 16 and Supabase: sign-in, per-workspace
-membership and roles, RLS-scoped data and Stripe billing, plus one worked domain
-module — an optional **products** section with categories, variants, stock,
-date-based inventory and a media gallery. Switch it off and you are back to the
-bare base; copy it for the next section (see
+membership and roles, RLS-scoped data and Stripe billing, plus two worked domain
+modules — an optional **products** section with categories, variants, stock,
+date-based inventory and a media gallery, and an optional **assets** section that
+records the individual units behind a product. Switch either off and you are back
+to the bare base; copy them for the next section (see
 [Adding a new section](#adding-a-new-section)) and delete nothing.
 
 Each company is a **tenant** addressed by a path segment: `/acme/dashboard`,
@@ -81,6 +82,12 @@ pnpm dev
    policy per table per verb, and the public `product-media` bucket with its
    storage policies. It needs PostgreSQL 15 or newer, for
    `on delete set null (column)` — that is Supabase's baseline.
+   `20260101000300_assets.sql` adds the optional assets section: the
+   `asset_status` enum, `assets` (one row per physical unit), the composite key
+   back to `products` that unassigns instead of deleting, the
+   `status_changed_at` trigger, and a policy per verb. It asks
+   `has_company_section(company_id, 'assets')`, never the products key, so the
+   two sections switch independently.
 
    A feature module adds its own numbered migration; it never edits the ones
    before it.
@@ -236,12 +243,12 @@ event. Tests that cover that behaviour stub the values themselves.
 
 | Area            | Files                                                                          | Covers                                                                                                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pure helpers    | `tests/unit/`                                                                  | slug generation against the `companies.slug` CHECK regex, query-param and class-name helpers, post-login redirect validation, the five-role hierarchy and assignable-role rules, plan filtering/formatting and `/100` price parity with the rest of the app, the section registry and its switch, product handles/money/stock/variant grouping/date windows/media limits |
+| Pure helpers    | `tests/unit/`                                                                  | slug generation against the `companies.slug` CHECK regex, query-param and class-name helpers, post-login redirect validation, the five-role hierarchy and assignable-role rules, plan filtering/formatting and `/100` price parity with the rest of the app, the section registry and its switch, product handles/money/stock/variant grouping/date windows/media limits, asset handles/names/serials and derived availability |
 | Config guards   | `tests/unit/{stripe,site,supabase-env,security-headers}.test.ts`                | lazy Stripe client, origin resolution behind proxy headers (including malformed `Host`/`X-Forwarded-Proto`), named missing-env errors, the response header set and its production-only HSTS |
 | Route handlers  | `tests/api/`                                                                   | Stripe webhook signature/secret checks, every status → enum mapping, idempotent replay, 5xx retry semantics, unmatched subscriptions, OAuth code exchange, email `token_hash` verification, open-redirect guards, invitation acceptance only for `type=invite` |
-| Server Actions  | `tests/actions/`                                                               | tenant resolution, role gates, pending invitation creation (and identical wording for both paths), accepting/declining an invitation, validation messages, plan validation against Stripe, Postgres error codes (`23503`, `23505`), checkout rollback, product/category/variant/stock/date writes scoped by tenant, the section switch, gallery upload targets and path checks |
+| Server Actions  | `tests/actions/`                                                               | tenant resolution, role gates, pending invitation creation (and identical wording for both paths), accepting/declining an invitation, validation messages, plan validation against Stripe, Postgres error codes (`23503`, `23505`), checkout rollback, product/category/variant/stock/date writes scoped by tenant, the section switch, gallery upload targets and path checks, asset writes scoped by tenant with the front-desk status gate |
 | Routing         | `tests/integration/`                                                           | which paths require auth, cookie preservation across redirects, matcher exclusions            |
-| Schema          | `tests/db/schema.test.ts`                                                      | RLS enabled on every table, slug regex parity with the client, `anon` grant revocation, invitation columns/policies, accepted-only membership predicates, enum parity, the section predicate in every products policy, tenant-keyed foreign keys, the single-level variant trigger and the bucket limits |
+| Schema          | `tests/db/schema.test.ts`                                                      | RLS enabled on every table, slug regex parity with the client, `anon` grant revocation, invitation columns/policies, accepted-only membership predicates, enum parity, the section predicate in every products *and* assets policy, tenant-keyed foreign keys, the single-level variant trigger, the assets status trigger, no stored asset count, and the bucket limits |
 
 `tests/helpers/` holds a thenable Supabase query-builder mock that records every
 chained call, so assertions can check the filters that were applied
@@ -275,10 +282,10 @@ Tests must pass before anything deploys:
    visit whose stored status has not settled, so a missed webhook cannot leave a
    paying company looking unpaid.
 4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
-   optional sections the workspace has switched on; **Products** is off until an
-   owner or admin enables it on `/{slug}/settings` → Sections. Settings and
-   billing live in the account menu at the foot of the rail, and both are
-   owner/admin-only — a manager or viewer sees neither.
+   optional sections the workspace has switched on; **Products** and **Assets**
+   are off until an owner or admin enables them on `/{slug}/settings` →
+   Sections. Settings and billing live in the account menu at the foot of the
+   rail, and both are owner/admin-only — a manager or viewer sees neither.
 
 ## Team roles and invitations
 
@@ -290,14 +297,17 @@ invited explicitly.
 | ----------------------------------- | :---: | :---: | :-----: | :---: | :----: |
 | Read every workspace page           |  yes  |  yes  |   yes   |  yes  |  yes   |
 | Write in the products section       |  yes  |  yes  |   yes   |   —   |   —    |
+| Add, edit and remove assets         |  yes  |  yes  |   yes   |   —   |   —    |
+| Move an asset in or out of service  |  yes  |  yes  |   yes   |  yes  |   —    |
 | Switch sections on and off          |  yes  |  yes  |    —    |   —   |   —    |
 | Billing and company details         |  yes  |  yes  |    —    |   —   |   —    |
 | Invite, re-role and remove the team |  yes  |  yes  |    —    |   —   |   —    |
 
-`manager` is the write tier the products section uses; `staff` reads it and can
-be given front-line writes by a module that knows what those are. Gate the UI with
-`canManage`/`canFrontDesk` and mirror the same role lists in the RLS policy — the
-two are cheap to keep in step and expensive to drift.
+`manager` is the write tier the products section uses; `staff` reads it, and the
+assets section is where the front-desk tier finally writes something — its own
+status field. Gate the UI with `canManage`/`canFrontDesk` and mirror the same role
+lists in the RLS policy — the two are cheap to keep in step and expensive to
+drift.
 
 The application predicates live in `lib/roles.ts`
 (`canAdminister` → `canManage` → `canFrontDesk`) and are re-checked by RLS.
@@ -412,6 +422,65 @@ A storefront needs no session and no API route of its own:
 - everything else a shop needs that has no column yet: `products.metadata`
   (`jsonb`), which a module can extend without a migration.
 
+## The assets section
+
+`app/[tenant]/assets/` is the second worked module, and deliberately a different
+shape from the first: it records *physical* things, it reads one column of another
+module, and its day-to-day writer is the front desk rather than a manager.
+
+It switches on the same way — an owner or admin ticks **Assets** under
+**Settings → Sections** — and while it is off its routes `notFound()` and every
+policy refuses the rows. Nothing is deleted, ever.
+
+### What it stores
+
+| Table    | Holds                                                                                                       |
+| -------- | ----------------------------------------------------------------------------------------------------------- |
+| `assets` | One row per physical unit: `name`, `handle`, optional `serial`, a `status`, the product it fulfils, and notes |
+
+Three decisions are worth explaining, because they shape everything else:
+
+- **An asset is a unit, not a quantity.** `bike-1`, `bike-2` and `bike-3` are
+  three rows against one sellable product. Taking one out of action removes
+  exactly one unit from what the shop can promise, which a stock number cannot
+  express.
+- **Availability is derived, never copied.** `availabilityLabel()` in
+  `lib/assets.ts` counts the rows on every render ("2 of 3 available"), and
+  nothing writes a count back onto `products.inventory_quantity` or
+  `product_dates.inventory_quantity`. The two cannot drift because there is only
+  one truth — a status per unit. `tests/db/schema.test.ts` fails if the assets
+  table ever grows a stock column.
+- **The module stands alone.** `assets.product_id` is nullable and is *cleared*
+  rather than cascaded when a product is deleted (`on delete set null
+  (product_id)` on a composite key, so the tenant column survives), and every
+  policy asks `has_company_section(company_id, 'assets')` — never the products
+  key. A workspace can run a fleet with the catalogue switched off, and switching
+  the products section off never takes the units with it.
+
+### Who may do what
+
+- **Read**: any accepted member (`member` and up) — the fleet is shop
+  information, like the catalogue. It is never customer-facing: no policy reaches
+  `anon` and there is no public surface.
+- **Status**: owner, admin, manager and **staff**. `setAssetStatus` sends only the
+  `status` field, so the front desk can take a unit out of action without holding
+  the manager tier — and without being able to change anything else through that
+  action. The policy is row-level, so a staff session could still reach other
+  columns over REST; making that impossible needs a separate status-event table,
+  which is the service module's job.
+- **Everything else**: owner, admin and manager, for adding a unit, editing it and
+  deleting it. Retiring is the reversible option and the page says so.
+
+`status_changed_at` (kept by the `assets_stamp_status_change` trigger) and
+`metadata` are the seams a future **service** module will use for hours, distance,
+repairs and downtime. This section deliberately does not grow a servicing table it
+cannot yet describe, and it does not reserve a unit for a date: availability here
+is a display concern, not a booking.
+
+A product page shows its units in an **Assets** card when both sections are on;
+that card is one-directional — the assets section never renders anything from the
+products module on its own pages beyond a link.
+
 ## Security
 
 ### Authorization is four layers, all server-side
@@ -445,16 +514,21 @@ which is request-scoped.
 - **Owner and admin rows cannot be created or changed from a client session.**
   The membership policies admit `manager`, `staff` and `member` only.
 - **A switched-off section grants nothing.** Every policy in the products module
-  also asks `has_company_section(company_id, 'products')`, a `SECURITY DEFINER`
-  helper that reads `companies.enabled_sections` and is revoked from `anon`. The
-  switch is data, not code: flipping it off hides rows and keeps them.
+  also asks `has_company_section(company_id, 'products')`, and every policy in the
+  assets module asks the same about `'assets'` — a `SECURITY DEFINER` helper that
+  reads `companies.enabled_sections` and is revoked from `anon`. The switch is
+  data, not code: flipping it off hides rows and keeps them. The two keys are
+  deliberately separate, so switching one section off cannot switch the other off
+  with it.
 - **A product variant is one level deep.** `products.parent_id` is a
   self-reference, and `products_check_variant_depth()` refuses a variant of a
   variant — and a product that has variants becoming one — in both directions.
 - **A child row cannot point outside its tenant.** Every child key is composite
   (`(company_id, product_id)`, `(company_id, category_id)`,
   `(company_id, parent_id)`), so a row can only reference a parent of the same
-  company. That holds even if a policy were written wrongly.
+  company. That holds even if a policy were written wrongly. `assets` uses the
+  same shape with `on delete set null (product_id)`: deleting a product unassigns
+  its units instead of destroying the record of a physical thing.
 - **Money is a non-negative integer in minor units.** `price_cents`,
   `compare_at_price_cents` and `product_dates.price_cents` are `integer` with
   `check (>= 0)`, and `currency` is a three-letter lowercase code.
@@ -569,6 +643,12 @@ breaks every other project on the same port.
   gallery uploader is a Client Component. `productHandleProblem` wraps
   `categoryHandleProblem` and adds the section's own route words (`new`,
   `categories`) to the reserved list, so a product can never sit on a page URL.
+- **`lib/assets.ts`** holds the fleet rules the forms, actions and tests share —
+  handle/name/serial limits that mirror the column checks, the status ladder, and
+  the derived availability helpers (`summariseAssets`, `availabilityLabel`,
+  `assetsForProduct`, `assetsByProduct`). Client-safe for the same reason as
+  `lib/products.ts`. It does not import from the products module: the only link
+  between the two is the `product_id` column and a route.
 - **`lib/supabase/admin.ts`** is the only place the secret key is used. It is
   `server-only` and bypasses RLS, so it is reserved for provisioning a company,
   inviting a user (`inviteUserByEmail`), and reconciling Stripe webhooks. Key resolution lives in `lib/supabase/env.ts`
@@ -622,6 +702,9 @@ app/
     products/new/                # create a product
     products/[handle]/           # details, stock, dates, variants, gallery
     products/categories/         # aisle management
+    assets/                      # assets section (the units behind a product)
+    assets/[handle]/             # status, product assignment, removal
+    fields.ts                    # shared class strings for native form controls
     settings/                    # company + sections + team cards
     settings/billing/            # plan, portal, invoices
 components/
@@ -629,6 +712,7 @@ components/
 lib/
   auth.ts                        # session + tenancy data access layer
   features.ts                    # optional-section registry + switch (client-safe)
+  assets.ts                      # fleet rules + derived availability (client-safe)
   products.ts                    # catalogue rules, money, stock and media (client-safe)
   roles.ts                       # labels + authorization predicates (client-safe)
   safe-redirect.ts               # post-login `next` validation (client-safe)
@@ -639,15 +723,18 @@ lib/
   subscriptions.ts               # plan catalogue, read from Stripe
   supabase/{client,server,admin,proxy,env,env.server}.ts
   actions/{auth,billing,company,members,products,settings,support}.ts
-supabase/migrations/             # schema + RLS (three files)
+  actions/assets.ts              # asset writes, with the front-desk status gate
+supabase/migrations/             # schema + RLS (four files)
 tests/                           # unit, actions, api, integration, db
 ```
 
 ## Adding a new section
 
-The products module is the worked example, so copy it when you add the next one.
-Say the new section is called `orders`. Six steps, in this order — each step ends
-with something runnable:
+The products module is the worked example, so copy it when you add the next one —
+and read the assets module too, if your section has to point at another module's
+rows or needs a role tier the products section does not use. Say the new section is
+called `orders`. Six steps, in this order — each step ends with something
+runnable:
 
 1. **Schema** — `supabase/migrations/<timestamp>_orders.sql`. Copy the shape of
    `company_members`:
@@ -693,13 +780,18 @@ with something runnable:
    If one of your tables references another, key the reference on the tenant as
    well — `foreign key (company_id, customer_id) references ... (company_id, id)`
    — or a member of one company can point a row at another company's row.
-   A policy only checks the row being written.
+   A policy only checks the row being written. Then decide what happens when the
+   parent goes away: `assets` uses `on delete set null (product_id)` so a physical
+   unit survives its catalogue row, and the section keeps working with the other
+   module switched off.
 
 2. **Types** — add the table to `lib/supabase/types.ts` (`Row`, `Insert`,
    `Update`, `Relationships: []`) and to `MODULE_TABLES` in
    `tests/db/schema.test.ts` — a module's tables go there, `CORE_TABLES` is what
    every deployment ships. Both arrays are `satisfies readonly TableName[]`, so
-   the compiler tells you if the two disagree.
+   the compiler tells you if the two disagree. The assets module keeps its own
+   `ASSET_TABLES` and spreads it into `MODULE_TABLES`, so each migration can be
+   asserted against its own file.
 
 3. **Action** — `lib/actions/orders.ts`:
 

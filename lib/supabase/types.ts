@@ -38,6 +38,15 @@ export type ProductKind = "item" | "dated";
 
 export type ProductMediaKind = "image" | "video";
 
+/**
+ * The state of one physical unit.
+ *
+ * `available` can be booked, `maintenance` is out of action but still in the
+ * fleet, `retired` has left it. The list is complete on creation, like the
+ * products ladder.
+ */
+export type AssetStatus = "available" | "maintenance" | "retired";
+
 export type Database = {
   public: {
     Tables: {
@@ -308,6 +317,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      assets: {
+        Row: {
+          id: string;
+          company_id: string;
+          product_id: string | null;
+          name: string;
+          handle: string;
+          serial: string | null;
+          status: AssetStatus;
+          status_changed_at: string;
+          notes: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          product_id?: string | null;
+          name: string;
+          handle: string;
+          serial?: string | null;
+          status?: AssetStatus;
+          status_changed_at?: string;
+          notes?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          product_id?: string | null;
+          name?: string;
+          handle?: string;
+          serial?: string | null;
+          status?: AssetStatus;
+          status_changed_at?: string;
+          notes?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: {
@@ -361,6 +415,7 @@ export type Database = {
       product_status: ProductStatus;
       product_kind: ProductKind;
       product_media_kind: ProductMediaKind;
+      asset_status: AssetStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };

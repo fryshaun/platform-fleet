@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { addMediaLink, removeProductMedia } from "@/lib/actions/products";
 import type { ProductMediaKind } from "@/lib/supabase/types";
 
-import { SELECT_CLASSES } from "../fields";
+import { SELECT_CLASSES } from "../../fields";
 import { GalleryUploader } from "./gallery-uploader";
 
 export type GalleryItem = {

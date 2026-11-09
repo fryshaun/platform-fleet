@@ -51,6 +51,7 @@ describe("section registry", () => {
 describe("isSectionKey", () => {
   it("accepts a known key", () => {
     expect(isSectionKey("products")).toBe(true);
+    expect(isSectionKey("assets")).toBe(true);
   });
 
   it("rejects anything else", () => {
@@ -68,7 +69,10 @@ describe("parseSectionKeys", () => {
   });
 
   it("collapses duplicates and returns registry order", () => {
-    expect(parseSectionKeys(["products", "products"])).toEqual(["products"]);
+    expect(parseSectionKeys(["assets", "products", "assets"])).toEqual([
+      "products",
+      "assets",
+    ]);
   });
 
   it("answers an empty list for no selection", () => {
@@ -83,6 +87,12 @@ describe("enabledSectionKeys", () => {
     expect(
       enabledSectionKeys({ enabled_sections: ["products", "unknown"] }),
     ).toEqual(["products"]);
+  });
+
+  it("keeps the sections in registry order, not the order they were switched on", () => {
+    expect(
+      enabledSectionKeys({ enabled_sections: ["assets", "products"] }),
+    ).toEqual(["products", "assets"]);
   });
 
   it("treats a missing value as nothing enabled", () => {
@@ -114,5 +124,15 @@ describe("isSectionEnabled", () => {
         "products",
       ),
     ).toBe(true);
+  });
+
+  it("switches each section independently", () => {
+    // The assets section is usable with the catalogue switched off, which is
+    // why `assets.product_id` is nullable and why its policies ask about the
+    // assets key only.
+    const company = companyRow({ enabled_sections: ["assets"] });
+
+    expect(isSectionEnabled(company, "assets")).toBe(true);
+    expect(isSectionEnabled(company, "products")).toBe(false);
   });
 });

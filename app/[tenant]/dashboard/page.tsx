@@ -106,6 +106,11 @@ async function DashboardContent({
               Switch on <strong>Products</strong> on Settings → Sections to start
               a catalogue of products, categories, variants and stock.
             </li>
+            <li>
+              Switch on <strong>Assets</strong> to record the individual units
+              behind a product — a bike, a boat, a room — and count what is
+              available today.
+            </li>
           </ul>
           {isAdmin ? (
             <div className="flex flex-wrap gap-2">
