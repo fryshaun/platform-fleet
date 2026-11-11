@@ -9,9 +9,19 @@ import {
   redirectWith,
 } from "@/lib/actions/support";
 import { parseSectionKeys, SECTIONS } from "@/lib/features";
+import { companyBadge, companyBadgeProblem } from "@/lib/company";
+import { isProductCurrency } from "@/lib/products";
 import { settingsSegment } from "@/lib/settings";
 
-/** Company name can change; the slug deliberately cannot (it is the URL). */
+/**
+ * Company name, default currency and badge can change; the slug deliberately
+ * cannot (it is the URL) and the logo has its own action because a file upload is
+ * not a form post.
+ *
+ * The currency is the *default* for new products: every product keeps its own
+ * `currency`, so re-pricing a workspace is an explicit act rather than a side
+ * effect of this form.
+ */
 export async function updateCompany(formData: FormData) {
   const slug = readField(formData, "slug");
   const context = await getActionContext(slug);
@@ -24,16 +34,35 @@ export async function updateCompany(formData: FormData) {
     });
   }
 
+  const currency = readField(formData, "currency");
+  if (!isProductCurrency(currency)) {
+    redirectWith(slug, settingsSegment("company"), {
+      error: "Choose a currency from the list.",
+    });
+  }
+
+  // Re-read through the shared rules rather than trusting the input's
+  // `maxLength`: an empty badge means "use the initials", not "store nothing
+  // visible".
+  const badgeField = readField(formData, "badge");
+  const badgeProblem = companyBadgeProblem(badgeField);
+  if (badgeProblem) {
+    redirectWith(slug, settingsSegment("company"), { error: badgeProblem });
+  }
+
   const { error } = await context.supabase
     .from("companies")
-    .update({ name })
+    .update({ name, currency, badge: companyBadge(badgeField) })
     .eq("id", context.company.id);
 
   if (error) {
     redirectWith(slug, settingsSegment("company"), { error: error.message });
   }
 
-  revalidatePath(`/${slug}`, "layout");
+  // The rail and the workspace chooser both draw the name and the mark, and the
+  // chooser lists workspaces other than this one — so the whole tree refreshes,
+  // the way the avatar actions do it.
+  revalidatePath("/", "layout");
   redirectWith(slug, settingsSegment("company"), { ok: "Company updated." });
 }
 

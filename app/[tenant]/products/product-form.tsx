@@ -23,10 +23,13 @@ export type { ProductCategoryOption };
 export function ProductForm({
   slug,
   categories,
+  defaultCurrency,
   product,
 }: {
   slug: string;
   categories: ProductCategoryOption[];
+  /** The workspace default the create form pre-selects; ignored when editing. */
+  defaultCurrency?: string;
   product?: Product;
 }) {
   const isEdit = Boolean(product);
@@ -47,6 +50,7 @@ export function ProductForm({
         <ProductFields
           slug={slug}
           categories={categories}
+          defaultCurrency={defaultCurrency}
           product={product}
           surface="page"
         />

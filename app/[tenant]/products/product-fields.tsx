@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProduct, updateProduct } from "@/lib/actions/products";
 import {
+  isProductCurrency,
   priceInputValue,
   PRODUCT_CURRENCY_OPTIONS,
   PRODUCT_KIND_OPTIONS,
@@ -35,6 +36,7 @@ export function ProductFields({
   slug,
   categories,
   product,
+  defaultCurrency = "usd",
   layout = "card",
   formId,
   submitLabel,
@@ -44,6 +46,12 @@ export function ProductFields({
   slug: string;
   categories: ProductCategoryOption[];
   product?: Product;
+  /**
+   * The workspace's default currency, pre-selected when creating. An edit ignores
+   * it: the product already has a currency of its own, and the form must show
+   * that one or saving would silently re-price it.
+   */
+  defaultCurrency?: string;
   /** `card` is a two-column grid; `panel` stacks the fields in the slideout. */
   layout?: "card" | "panel";
   /** Id of the `<form>`, so a button outside it can submit it with `form=`. */
@@ -161,7 +169,10 @@ export function ProductFields({
         <select
           id={fieldId("currency")}
           name="currency"
-          defaultValue={product?.currency ?? "usd"}
+          defaultValue={
+            product?.currency ??
+            (isProductCurrency(defaultCurrency) ? defaultCurrency : "usd")
+          }
           className={SELECT_CLASSES}
         >
           {PRODUCT_CURRENCY_OPTIONS.map((option) => (

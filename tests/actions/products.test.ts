@@ -4,6 +4,7 @@ import type { MemberRole } from "@/lib/supabase/types";
 
 import {
   COMPANY_ID,
+  companyRow,
   formDataOf,
   productRow,
   PRODUCT_ID,
@@ -64,6 +65,20 @@ function setup(
   sections: string[] = ["products"],
 ) {
   return tenantSetup(serverMock.createClient, handlers, role, { sections });
+}
+
+/** The same setup, for a workspace started in a currency other than dollars. */
+function setupIn(currency: string, role: MemberRole = "manager") {
+  return tenantSetup(
+    serverMock.createClient,
+    {
+      companies: () => ({
+        data: companyRow({ enabled_sections: ["products"], currency }),
+        error: null,
+      }),
+    },
+    role,
+  );
 }
 
 /** The smallest valid product form. */
@@ -147,6 +162,41 @@ describe("createProduct", () => {
       track_inventory: true,
       inventory_quantity: 0,
     });
+  });
+
+  it("falls back to the workspace's default currency", async () => {
+    const mock = setupIn("eur");
+
+    // A create form always posts the select, but a client that drops the field
+    // must not quietly write dollars into a euro workspace.
+    await captureRedirect(() =>
+      createProduct(formDataOf({ ...DRAFT, currency: "" })),
+    );
+
+    expect(mock.argFor("products", "insert")).toMatchObject({ currency: "eur" });
+  });
+
+  it("prefers the currency the form sends to the workspace default", async () => {
+    const mock = setupIn("eur");
+
+    await captureRedirect(() =>
+      createProduct(formDataOf({ ...DRAFT, currency: "gbp" })),
+    );
+
+    expect(mock.argFor("products", "insert")).toMatchObject({ currency: "gbp" });
+  });
+
+  it("falls back to dollars when the workspace default is not one this build offers", async () => {
+    const mock = setupIn("jpy");
+
+    // The column accepts any three-letter code; the app is the allowlist, and a
+    // workspace set by hand to something the form cannot show still creates
+    // products rather than failing every submit.
+    await captureRedirect(() =>
+      createProduct(formDataOf({ ...DRAFT, currency: "" })),
+    );
+
+    expect(mock.argFor("products", "insert")).toMatchObject({ currency: "usd" });
   });
 
   it("keeps an address the form supplies", async () => {
@@ -249,6 +299,21 @@ describe("updateProduct", () => {
       ["id", PRODUCT_ID],
       ["company_id", COMPANY_ID],
     ]);
+  });
+
+  it("falls back to the workspace's default currency when the field is dropped", async () => {
+    const mock = setupIn("nzd");
+
+    // The edit form always posts the product's own currency, so this only
+    // happens to a hand-written request — and a New Zealand workspace's default
+    // is a better guess than dollars.
+    await captureRedirect(() =>
+      updateProduct(formDataOf({ ...edit, currency: "" })),
+    );
+
+    expect(mock.argFor("products", "update")).toMatchObject({
+      currency: "nzd",
+    });
   });
 
   it("requires a product id", async () => {

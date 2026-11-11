@@ -31,6 +31,10 @@ export type Workspace = {
   slug: string;
   role: MemberRole;
   subscriptionStatus: SubscriptionStatus;
+  /** The uploaded mark, or `null` — the chooser then draws the badge. */
+  logoUrl: string | null;
+  /** One or two characters or an emoji; `null` means the initials of the name. */
+  badge: string | null;
 };
 
 export type TenantContext = {
@@ -109,7 +113,7 @@ export async function getWorkspaces(): Promise<Workspace[]> {
 
   const { data: companies } = await supabase
     .from("companies")
-    .select("id, name, slug, subscription_status")
+    .select("id, name, slug, subscription_status, logo_url, badge")
     .in(
       "id",
       memberships.map((membership) => membership.company_id),
@@ -129,6 +133,8 @@ export async function getWorkspaces(): Promise<Workspace[]> {
       name: company.name,
       slug: company.slug,
       subscriptionStatus: company.subscription_status,
+      logoUrl: company.logo_url,
+      badge: company.badge,
       role: roleByCompany.get(company.id) ?? "member",
     }))
     .sort((a, b) => a.name.localeCompare(b.name));

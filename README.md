@@ -92,6 +92,12 @@ pnpm dev
    the account photo: 2 MB per object, four image types, and a policy per verb
    comparing the first path segment with `auth.uid()`. No company is consulted —
    a photo follows the person between workspaces.
+   `20260101000500_company_identity.sql` adds what a workspace looks like and what
+   it sells in: `companies.currency` (the default the product form pre-fills, with
+   the same `^[a-z]{3}$` rule as `products.currency`), `companies.badge`, and
+   `companies.logo_url` behind the public `company-logos` bucket. Writes are keyed
+   `<company-id>/<uuid>.<ext>` and allowed to owners and admins only; every member
+   can read the mark, and no section check is involved — identity is not optional.
 
    A feature module adds its own numbered migration; it never edits the ones
    before it.
@@ -285,7 +291,9 @@ Tests must pass before anything deploys:
    re-reads the subscription from Stripe on the billing page and on a dashboard
    visit whose stored status has not settled, so a missed webhook cannot leave a
    paying company looking unpaid.
-4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
+4. `/{slug}/dashboard` is the workspace. At the top of the rail sits the
+   workspace mark — the uploaded logo, or the badge, or the initials of the name
+   (see *Workspace identity*). The rail carries the dashboard plus the
    optional sections the workspace has switched on; **Products** and **Assets**
    are off until an owner or admin enables them on `/{slug}/settings` →
    Extensions. Screens that belong to a section but are gated more tightly hang
@@ -384,6 +392,43 @@ Two limits are worth knowing before you change this:
   `changePassword` to fetch and use one. Changing the email address, and the
   forgot-password flow, deliberately stay in Supabase's own email templates.
 
+## Workspace identity
+
+A workspace is drawn as a square in two places — the top of the rail and each row
+of `/workspaces` — and both use the same `CompanyMark` component, so they cannot
+disagree about what it shows. Three sources, in this order:
+
+1. **Logo** — `companies.logo_url`, uploaded from Settings → Company. The browser
+   uploads straight to the public `company-logos` bucket through a signed URL
+   (`createLogoUploadUrl`) and `setCompanyLogo` records the result. Objects are
+   keyed `<company-id>/<uuid>.<ext>`, the object it replaces is deleted, and 2 MB /
+   PNG / JPEG / WebP / AVIF are the limits. The folder check is repeated in the
+   action, so a modified client cannot point the column at another workspace's
+   file.
+2. **Badge** — `companies.badge`: one or two characters, or a single emoji. This
+   is the field a workspace that does not want to upload anything uses: `AB`, `A`,
+   `🚀`, `🇬🇧`. It is counted in *graphemes* (`Intl.Segmenter`), so a flag or a
+   family emoji is one character rather than the seven code points it is made of;
+   internal whitespace is refused, because the square would collapse it.
+3. **Initials** — `initials(companies.name)`, which is also what an empty badge
+   means. A workspace that never opens this screen is therefore never blank.
+
+Two consequences worth knowing:
+
+- **Both `updateCompany` and the logo actions revalidate the root layout**
+  (`revalidatePath("/", "layout")`), not the tenant. `/workspaces` lists every
+  workspace a person belongs to, so a tenant-scoped invalidation would leave a
+  renamed or re-badged company stale on the chooser. The extensions switch stays
+  tenant-scoped, because nothing outside the tenant draws it.
+- **The logo actions answer instead of redirecting**, like the account ones: they
+  are called from a form on a settings page, and a redirect would throw away the
+  message. The default currency and the badge are ordinary fields of the
+  `updateCompany` form post.
+
+Settings → Company is owner/admin only, which is the same gate the row's policy
+already enforced: the update policy on `companies` is `has_company_role(owner,
+admin)`, so no new grant was needed for the three columns.
+
 ## The products section
 
 `app/[tenant]/products/` is the template's first domain module and the worked
@@ -416,6 +461,11 @@ Three decisions are worth explaining, because they shape everything else:
 - **Money is stored in the currency's minor unit** (`price_cents`), the same
   convention as `lib/plans.ts`, and formatted through `formatPlanPrice` so the
   catalogue and the billing page print prices the same way.
+- **The currency defaults, it is not imposed.** `companies.currency` (Settings →
+  Company) is only the value the create form pre-selects, and the fallback the
+  action uses when a request arrives without the field. Every product keeps its
+  own `products.currency`, so changing the workspace default re-prices nothing
+  that already exists.
 
 Every child row is keyed on `(company_id, …)` rather than on an id alone:
 `foreign key (company_id, product_id) references products (company_id, id)`. A
@@ -799,10 +849,14 @@ components/
   tenant/settings-link.tsx       # the gear, drawn for owner and admin only
   tenant/user-settings-sheet.tsx # photo, name and password, from the avatar menu
   tenant/avatar-uploader.tsx     # signed upload straight to the avatars bucket
+  tenant/company-mark.tsx        # logo → badge → initials, in the rail and the chooser
+  tenant/company-logo-uploader.tsx # signed upload to the company-logos bucket
   tenant/form-sheet.tsx          # the shared "new …" slideout
 lib/
   auth.ts                        # session + tenancy data access layer
   account.ts                     # name, password and avatar rules (client-safe)
+  company.ts                     # badge, mark and logo rules (client-safe)
+  uploads.ts                     # image types, path checks, public URL parsing
   settings.ts                    # settings tabs: labels and paths (client-safe)
   features.ts                    # optional-section registry + switch (client-safe)
   assets.ts                      # fleet rules + derived availability (client-safe)
@@ -818,7 +872,7 @@ lib/
   supabase/{client,server,admin,proxy,env,env.server}.ts
   actions/{account,auth,billing,company,members,products,settings,support}.ts
   actions/assets.ts              # asset writes, with the front-desk status gate
-supabase/migrations/             # schema + RLS (five files)
+supabase/migrations/             # schema + RLS (six files)
 tests/                           # unit, actions, api, integration, db
 ```
 

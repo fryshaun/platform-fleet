@@ -108,9 +108,16 @@ function createErrorPath(formData: FormData): string {
     : "products/new";
 }
 
-/** Reads and validates the fields shared by create and update. */
+/**
+ * Reads and validates the fields shared by create and update.
+ *
+ * `defaultCurrency` is the workspace's own default, used when the form did not
+ * send one — the same value the form pre-fills, so a browser that drops the field
+ * cannot quietly fall back to dollars for a euro workspace.
+ */
 function readProductDraft(
   formData: FormData,
+  defaultCurrency: string,
 ): { draft: ProductDraft } | { error: string } {
   const title = readField(formData, "title");
   if (title.length < 2) {
@@ -153,7 +160,12 @@ function readProductDraft(
     return { error: "Choose how this product is stocked." };
   }
 
-  const currency = readField(formData, "currency") || "usd";
+  // A workspace whose default is not one of the codes this build offers (an older
+  // row, or a hand-written URL) falls back to dollars rather than writing a
+  // currency the form cannot show afterwards.
+  const currency =
+    readField(formData, "currency") ||
+    (isProductCurrency(defaultCurrency) ? defaultCurrency : "usd");
   if (!isProductCurrency(currency)) {
     return { error: "Choose a currency from the list." };
   }
@@ -191,7 +203,7 @@ export async function createProduct(formData: FormData) {
   requireManager(context, slug);
   requireSection(context, slug, "products");
 
-  const parsed = readProductDraft(formData);
+  const parsed = readProductDraft(formData, context.company.currency);
   if ("error" in parsed) {
     redirectWith(slug, createErrorPath(formData), { error: parsed.error });
   }
@@ -229,7 +241,7 @@ export async function updateProduct(formData: FormData) {
   }
 
   const back = productPath(formData);
-  const parsed = readProductDraft(formData);
+  const parsed = readProductDraft(formData, context.company.currency);
   if ("error" in parsed) {
     redirectWith(slug, back, { error: parsed.error });
   }

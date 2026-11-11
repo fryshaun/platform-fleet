@@ -32,6 +32,7 @@ const MIGRATION_FILES = [
   "20260101000200_products.sql",
   "20260101000300_assets.sql",
   "20260101000400_account_avatars.sql",
+  "20260101000500_company_identity.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -43,12 +44,14 @@ const invitationSql = readMigration("20260101000100_team_invitations.sql");
 const productsSql = readMigration("20260101000200_products.sql");
 const assetsSql = readMigration("20260101000300_assets.sql");
 const avatarsSql = readMigration("20260101000400_account_avatars.sql");
+const identitySql = readMigration("20260101000500_company_identity.sql");
 const allSql = [
   accountsSql,
   invitationSql,
   productsSql,
   assetsSql,
   avatarsSql,
+  identitySql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -686,6 +689,77 @@ describe("account avatars", () => {
   it("is applied after the profile column it fills", () => {
     expect(
       MIGRATION_FILES.indexOf("20260101000400_account_avatars.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
+    );
+  });
+});
+
+describe("company identity", () => {
+  it("adds the default currency, the logo and the badge to the company row", () => {
+    expect(identitySql).toContain(
+      "add column if not exists currency text not null default 'usd'",
+    );
+    expect(identitySql).toContain("add column if not exists logo_url text");
+    expect(identitySql).toContain("add column if not exists badge text");
+  });
+
+  it("accepts the same currency codes as products.currency", () => {
+    // The column is the outer bound; `lib/products.ts` is the allowlist the form
+    // and the actions enforce, so adding a currency needs no migration.
+    expect(identitySql).toContain("check (currency ~ '^[a-z]{3}$')");
+    expect(productsSql).toContain("check (currency ~ '^[a-z]{3}$')");
+  });
+
+  it("treats an absent badge as \"draw the initials\"", () => {
+    // Null, not empty string: `companyMark()` branches on it. The length bound
+    // is in UTF-16 units, so a multi-code-point emoji fits inside it; the
+    // one-or-two *graphemes* rule lives in `lib/company.ts`.
+    expect(identitySql).toContain(
+      "check (badge is null or length(badge) between 1 and 8)",
+    );
+  });
+
+  it("declares the bucket the uploader writes to, with the same limits", () => {
+    // `lib/company.ts` repeats the size ceiling and the MIME list; these
+    // assertions are what keep the two in step.
+    expect(identitySql).toContain("'company-logos'");
+    expect(identitySql).toContain("2097152");
+    expect(identitySql).toContain("'image/png'");
+    expect(identitySql).toContain("'image/avif'");
+  });
+
+  it("keys every policy on the company in the first path segment", () => {
+    const policies = identitySql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies).toHaveLength(4);
+    for (const policy of policies) {
+      expect(policy).toContain("bucket_id = 'company-logos'");
+      expect(policy).toContain("public.storage_company_id(name)");
+    }
+  });
+
+  it("lets every member read the mark and only owners and admins write it", () => {
+    const policies = identitySql.match(/create policy[\s\S]*?;/g) ?? [];
+    const [select, insert, update, remove] = policies;
+
+    // A logo is rendered in the rail for everybody in the workspace…
+    expect(select).toContain("public.is_company_member(");
+    // …but changing it is an administrative act, like the name and the address.
+    for (const policy of [insert, update, remove]) {
+      expect(policy).toContain("array['owner', 'admin']::public.member_role[]");
+    }
+  });
+
+  it("asks no section before letting a logo through", () => {
+    // Identity belongs to the workspace itself, so switching a module off must
+    // not blank the rail.
+    expect(identitySql).not.toContain("has_company_section");
+  });
+
+  it("is applied after the company table it extends", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101000500_company_identity.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
     );

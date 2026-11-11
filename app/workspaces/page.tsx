@@ -5,6 +5,7 @@ import { ArrowRightIcon, PlusIcon } from "lucide-react";
 import { Suspense } from "react";
 
 import { FormMessage } from "@/components/form-message";
+import { CompanyMark } from "@/components/tenant/company-mark";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -209,11 +210,19 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
       href={`/${workspace.slug}/dashboard`}
       className="border-border/60 hover:bg-accent/60 flex items-center justify-between gap-4 rounded-xl border p-4 transition-colors"
     >
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{workspace.name}</p>
-        <p className="text-muted-foreground truncate text-xs">
-          /{workspace.slug} · {roleLabel(workspace.role)}
-        </p>
+      <div className="flex min-w-0 items-center gap-3">
+        <CompanyMark
+          name={workspace.name}
+          logoUrl={workspace.logoUrl}
+          badge={workspace.badge}
+          className="size-10"
+        />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{workspace.name}</p>
+          <p className="text-muted-foreground truncate text-xs">
+            /{workspace.slug} · {roleLabel(workspace.role)}
+          </p>
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {needsBilling ? (

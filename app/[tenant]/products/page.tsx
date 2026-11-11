@@ -188,6 +188,7 @@ async function ProductsContent({
                 <ProductFields
                   slug={company.slug}
                   categories={categories}
+                  defaultCurrency={company.currency}
                   layout="panel"
                   formId={NEW_PRODUCT_FORM_ID}
                   surface="panel"

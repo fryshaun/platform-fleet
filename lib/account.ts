@@ -1,4 +1,12 @@
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-policy";
+import {
+  IMAGE_ACCEPT,
+  IMAGE_TYPES,
+  imageTypeFor,
+  isImagePathIn,
+  publicObjectPath,
+  type ImageType,
+} from "@/lib/uploads";
 
 /**
  * Rules for a person's own account — their name, their photo, their password.
@@ -100,30 +108,25 @@ export function initials(value: string | null): string {
 // -----------------------------------------------------------------------------
 // Avatar storage
 // -----------------------------------------------------------------------------
+// The type list, the path shape and the URL parse are shared with workspace
+// logos (see `lib/uploads.ts`); what is specific to an avatar is the bucket and
+// the fact that the folder is the *account* rather than a company.
 /** The Storage bucket every avatar object lives in. */
 export const AVATARS_BUCKET = "avatars";
 
 /** Mirrors `file_size_limit` on the bucket. */
 export const AVATAR_MAX_BYTES = 2_097_152;
 
-export type AvatarType = {
-  mime: string;
-  extension: string;
-};
+export type AvatarType = ImageType;
 
 /** Mirrors `allowed_mime_types` on the bucket. */
-export const AVATAR_TYPES: readonly AvatarType[] = [
-  { mime: "image/png", extension: "png" },
-  { mime: "image/jpeg", extension: "jpg" },
-  { mime: "image/webp", extension: "webp" },
-  { mime: "image/avif", extension: "avif" },
-];
+export const AVATAR_TYPES: readonly AvatarType[] = IMAGE_TYPES;
 
 /** The `accept` attribute of the photo input. */
-export const AVATAR_ACCEPT = AVATAR_TYPES.map((type) => type.mime).join(",");
+export const AVATAR_ACCEPT = IMAGE_ACCEPT;
 
 export function avatarTypeFor(mime: string): AvatarType | null {
-  return AVATAR_TYPES.find((type) => type.mime === mime) ?? null;
+  return imageTypeFor(mime);
 }
 
 /**
@@ -142,44 +145,16 @@ export function avatarPath(userId: string, file: string): string {
  * `profiles.avatar_url` at somebody else's object.
  */
 export function isOwnAvatarPath(path: string, userId: string): boolean {
-  const [folder, file, ...extra] = path.split("/");
-
-  if (folder !== userId || file === undefined || extra.length > 0) {
-    return false;
-  }
-  if (file.includes("..") || file === "") {
-    return false;
-  }
-
-  const dot = file.lastIndexOf(".");
-  if (dot <= 0) {
-    return false;
-  }
-
-  const extension = file.slice(dot + 1);
-  return AVATAR_TYPES.some((type) => type.extension === extension);
+  return isImagePathIn(path, userId, AVATAR_TYPES);
 }
 
-/** Where the public URLs for this bucket start. */
-const PUBLIC_AVATAR_MARKER = `/object/public/${AVATARS_BUCKET}/`;
-
 /**
- * The object path behind one of our own public URLs, or `null`.
+ * The object path behind one of our own avatar URLs, or `null`.
  *
  * Used to delete the photo a person just replaced. Anything else — a Gravatar
  * link, an empty column — is left alone, because it is not an object this app
  * could remove.
  */
 export function avatarStoragePath(url: string | null): string | null {
-  if (!url) {
-    return null;
-  }
-
-  const index = url.indexOf(PUBLIC_AVATAR_MARKER);
-  if (index === -1) {
-    return null;
-  }
-
-  const path = url.slice(index + PUBLIC_AVATAR_MARKER.length);
-  return path === "" || path.includes("..") ? null : path;
+  return publicObjectPath(url, AVATARS_BUCKET);
 }

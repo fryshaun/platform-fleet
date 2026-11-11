@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 
+import { CompanyMark } from "@/components/tenant/company-mark";
 import {
   SidebarNav,
   type NavItem,
@@ -8,7 +9,6 @@ import {
 import { SettingsLink } from "@/components/tenant/settings-link";
 import { UserMenu } from "@/components/tenant/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { initials } from "@/lib/account";
 import { getTenantContext } from "@/lib/auth";
 import { enabledSectionKeys, SECTIONS } from "@/lib/features";
 import { canAdminister, canManage, roleLabel } from "@/lib/roles";
@@ -65,12 +65,19 @@ export async function TenantSidebar({ slug }: { slug: string }) {
       className="bg-sidebar border-none flex w-14 shrink-0 flex-col items-center justify-between border-r py-3"
     >
       <div className="flex flex-col items-center gap-3">
+        {/* The workspace mark: a logo, then the badge, then the initials of the
+            name — the same order the settings screen describes. */}
         <Link
           href={`/${company.slug}/dashboard`}
           aria-label={`${company.name} dashboard`}
-          className="bg-primary text-primary-foreground flex size-9 items-center justify-center rounded-md text-xs font-semibold"
+          className="rounded-md"
         >
-          {initials(company.name)}
+          <CompanyMark
+            name={company.name}
+            logoUrl={company.logo_url}
+            badge={company.badge}
+            className="size-9"
+          />
         </Link>
 
         <SidebarNav items={items} />
