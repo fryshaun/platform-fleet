@@ -3,6 +3,7 @@ import {
   EmailPasswordForm,
   type AuthMode,
 } from "@/components/auth/email-password-form";
+import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 import { MagicLinkForm } from "@/components/auth/magic-link-form";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,8 @@ export function SignInCard({
         {error ? <AuthError>{error}</AuthError> : null}
 
         <EmailPasswordForm mode={mode} next={next} />
+
+        {mode === "signin" ? <ForgotPasswordForm /> : null}
 
         <Divider />
 

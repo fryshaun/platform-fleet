@@ -26,9 +26,8 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: serverMock.createClient,
 }));
 
-const { updateCompany, updateEnabledSections } = await import(
-  "@/lib/actions/settings"
-);
+const { updateCompany, updateEnabledSections, updateTwoFactorPolicy } =
+  await import("@/lib/actions/settings");
 
 describe("updateCompany", () => {
   beforeEach(() => cacheMock.revalidatePath.mockReset());
@@ -282,5 +281,65 @@ describe("updateEnabledSections", () => {
     await captureRedirect(() => updateEnabledSections(sectionsForm(["products"])));
 
     expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme", "layout");
+  });
+});
+
+describe("updateTwoFactorPolicy", () => {
+  it("denies a plain member", async () => {
+    tenantSetup(serverMock.createClient, {}, "member");
+
+    const url = await captureRedirect(() =>
+      updateTwoFactorPolicy(formDataOf({ slug: "acme", require_mfa: "on" })),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
+  });
+
+  it("does not let a manager switch it on", async () => {
+    const mock = tenantSetup(serverMock.createClient, {}, "manager");
+
+    await captureRedirect(() =>
+      updateTwoFactorPolicy(formDataOf({ slug: "acme", require_mfa: "on" })),
+    );
+
+    expect(mock.methodsFor("companies")).not.toContain("update");
+  });
+
+  it("stores a ticked box as true and says what happens next", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateTwoFactorPolicy(formDataOf({ slug: "acme", require_mfa: "on" })),
+    );
+
+    expect(mock.argFor("companies", "update")).toEqual({ require_mfa: true });
+    expect(redirectPath(url)).toBe("/acme/settings/security");
+    expect(redirectParams(url).get("ok")).toContain("now required");
+  });
+
+  it("stores an unticked box as false", async () => {
+    // A checkbox posts nothing at all when it is cleared.
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateTwoFactorPolicy(formDataOf({ slug: "acme" })),
+    );
+
+    expect(mock.argFor("companies", "update")).toEqual({ require_mfa: false });
+    expect(redirectParams(url).get("ok")).toContain("no longer required");
+  });
+
+  it("revalidates the tree, because every screen reads the flag", async () => {
+    tenantSetup(serverMock.createClient);
+
+    await captureRedirect(() =>
+      updateTwoFactorPolicy(formDataOf({ slug: "acme", require_mfa: "on" })),
+    );
+
+    // The gate lives in `getTenantContext()`, which is cached per request tree;
+    // without this the member's next page would still think they were allowed.
+    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });

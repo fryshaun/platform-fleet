@@ -23,3 +23,18 @@ const DEPLOYMENT_ONLY_VARIABLES = [
 for (const name of DEPLOYMENT_ONLY_VARIABLES) {
   delete process.env[name];
 }
+
+/**
+ * `NODE_ENV` is not a deployment variable, but it arrives the same way: Vercel
+ * exports `production` for the build, and Vitest only supplies `test` when the
+ * value is missing — so the same suite ran in production mode on the build
+ * machine and in `test` mode locally, and `lib/recovery.ts` (which marks the
+ * cookie `secure` only in production) broke there and nowhere else.
+ *
+ * Pinned to what `vitest run` gives on a developer's machine. Tests that need a
+ * different mode stub it themselves.
+ *
+ * Cast rather than assigned directly: Next's `ProcessEnv` augmentation marks
+ * `NODE_ENV` read-only, and the value here is the platform's, not ours.
+ */
+(process.env as Record<string, string | undefined>).NODE_ENV = "test";

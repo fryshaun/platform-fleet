@@ -20,6 +20,12 @@ export async function createClient() {
     getSupabaseUrl(),
     getSupabasePublishableKey(),
     {
+      auth: {
+        // Enables `auth.mfa.recoveryCodes.*` — the backup codes in the account
+        // sheet and on `/mfa`. The flag has to be set on every client that
+        // touches those methods; `proxy.ts` never does, so it is not set there.
+        experimental: { recoveryCodes: true },
+      },
       cookies: {
         getAll() {
           return cookieStore.getAll();

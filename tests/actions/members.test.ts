@@ -236,6 +236,9 @@ describe("inviteMember", () => {
     expect(inviteUserByEmail).toHaveBeenCalledWith("new.person@example.com", {
       redirectTo:
         "https://platform.example.com/auth/callback?next=%2Facme%2Fdashboard",
+      // The invitation template can name the workspace, so the recipient knows
+      // who is asking before they click.
+      data: { company_name: "Acme Studio" },
     });
     expect(server.argFor("company_members", "insert")).toEqual({
       company_id: COMPANY_ID,

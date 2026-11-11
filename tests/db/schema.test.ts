@@ -33,6 +33,7 @@ const MIGRATION_FILES = [
   "20260101000300_assets.sql",
   "20260101000400_account_avatars.sql",
   "20260101000500_company_identity.sql",
+  "20260101000900_two_factor.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -45,6 +46,7 @@ const productsSql = readMigration("20260101000200_products.sql");
 const assetsSql = readMigration("20260101000300_assets.sql");
 const avatarsSql = readMigration("20260101000400_account_avatars.sql");
 const identitySql = readMigration("20260101000500_company_identity.sql");
+const twoFactorSql = readMigration("20260101000900_two_factor.sql");
 const allSql = [
   accountsSql,
   invitationSql,
@@ -52,6 +54,7 @@ const allSql = [
   assetsSql,
   avatarsSql,
   identitySql,
+  twoFactorSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -862,5 +865,79 @@ describe("enum values", () => {
       "maintenance",
       "retired",
     ] satisfies AssetStatus[]);
+  });
+});
+
+describe("two-factor authentication", () => {
+  it("adds the workspace policy as an off-by-default flag", () => {
+    // Off by default, so a deploy changes nothing until an owner asks for it.
+    expect(twoFactorSql).toContain(
+      "add column if not exists require_mfa boolean not null default false",
+    );
+  });
+
+  it("describes the flag in the type it is read through", () => {
+    // `Database["public"]["Tables"]["companies"]["Row"]` is hand-maintained; a
+    // column that exists in Postgres but not here is invisible to the app.
+    const row: PublicSchema["Tables"]["companies"]["Row"] = {
+      id: "c",
+      name: "Acme",
+      slug: "acme",
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      subscription_status: "none",
+      trial_ends_at: null,
+      enabled_sections: [],
+      currency: "usd",
+      logo_url: null,
+      badge: null,
+      require_mfa: false,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(row.require_mfa).toBe(false);
+  });
+
+  it("asks no new grant for the column", () => {
+    // Writes ride on `companies_update_admin` from migration 01; a second policy
+    // would be a second place to keep in step.
+    expect(twoFactorSql).not.toContain("create policy");
+    expect(twoFactorSql).not.toContain("grant update on public.companies");
+  });
+
+  it("answers the password question the client libraries cannot", () => {
+    expect(twoFactorSql).toContain("create or replace function public.has_password()");
+    // The truth lives in a schema `authenticated` cannot read.
+    expect(twoFactorSql).toContain("from auth.users u");
+    expect(twoFactorSql).toContain("u.encrypted_password is not null");
+    // A user with no session has no account to ask about.
+    expect(twoFactorSql).toContain("where u.id = auth.uid()");
+  });
+
+  it("is a definer function that cannot be redirected", () => {
+    // `security definer` is what lets it read `auth.users` at all, and an empty
+    // `search_path` is what stops a caller pointing it at a shadowing table.
+    expect(twoFactorSql).toContain("security definer");
+    expect(twoFactorSql).toContain("set search_path = ''");
+    expect(twoFactorSql).toContain("stable");
+  });
+
+  it("is callable by a session and by nobody else", () => {
+    expect(twoFactorSql).toContain(
+      "revoke all on function public.has_password() from public;",
+    );
+    expect(twoFactorSql).toContain(
+      "grant execute on function public.has_password() to authenticated;",
+    );
+    expect(twoFactorSql).not.toContain("to anon");
+  });
+
+  it("is applied after the company table it extends", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101000900_two_factor.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
+    );
   });
 });

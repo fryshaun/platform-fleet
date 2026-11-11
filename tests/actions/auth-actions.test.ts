@@ -24,6 +24,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const {
+  requestPasswordReset,
   sendMagicLink,
   signInWithEmail,
   signInWithGoogle,
@@ -164,6 +165,7 @@ type OtpArgs = {
   options: { emailRedirectTo: string; shouldCreateUser: boolean };
 };
 type VerifyCodeArgs = { email: string; token: string; type: string };
+type ResetArgs = { email: string; options: { redirectTo: string } };
 
 /** Installs a client whose email/password and OTP calls are observable. */
 function withEmailAuth() {
@@ -187,12 +189,28 @@ function withEmailAuth() {
   const verifyOtp = vi.fn<(args: VerifyCodeArgs) => Promise<AuthResult>>();
   verifyOtp.mockResolvedValue({ data: {}, error: null });
 
+  const resetPasswordForEmail =
+    vi.fn<(email: string, options: ResetArgs["options"]) => Promise<AuthResult>>();
+  resetPasswordForEmail.mockResolvedValue({ data: {}, error: null });
+
   const mock = createSupabaseMock({
-    auth: { signInWithPassword, signUp, signInWithOtp, verifyOtp },
+    auth: {
+      signInWithPassword,
+      signUp,
+      signInWithOtp,
+      verifyOtp,
+      resetPasswordForEmail,
+    },
   });
   serverMock.createClient.mockResolvedValue(mock.client);
 
-  return { signInWithPassword, signUp, signInWithOtp, verifyOtp };
+  return {
+    signInWithPassword,
+    signUp,
+    signInWithOtp,
+    verifyOtp,
+    resetPasswordForEmail,
+  };
 }
 
 describe("signInWithEmail", () => {
@@ -570,5 +588,67 @@ describe("verifyEmailOtp", () => {
     expect(state.error).toBe(
       "That code is wrong or has expired. Request a new link.",
     );
+  });
+});
+
+describe("requestPasswordReset", () => {
+  beforeEach(() => serverMock.createClient.mockReset());
+
+  it("sends the recovery link through the callback to the reset page", async () => {
+    const { resetPasswordForEmail } = withEmailAuth();
+
+    await requestPasswordReset(
+      INITIAL_STATE,
+      formDataOf({ email: "ada@example.com" }),
+    );
+
+    expect(resetPasswordForEmail).toHaveBeenCalledWith("ada@example.com", {
+      redirectTo:
+        "https://platform.example.com/auth/callback?next=%2Freset-password",
+    });
+  });
+
+  it("reads the same whether or not the address has an account", async () => {
+    // GoTrue answers a reset request for an unknown address without an error;
+    // the notice must not undo that by promising an email exists.
+    withEmailAuth();
+
+    const state = await requestPasswordReset(
+      INITIAL_STATE,
+      formDataOf({ email: "ada@example.com" }),
+    );
+
+    expect(state.error).toBeNull();
+    expect(state.notice).toContain("If ada@example.com has an account");
+  });
+
+  it("asks for the address when the field is blank", async () => {
+    withEmailAuth();
+
+    const state = await requestPasswordReset(
+      INITIAL_STATE,
+      formDataOf({ email: "   " }),
+    );
+
+    expect(state.error).toBe("Enter the email address you signed up with.");
+    expect(serverMock.createClient).not.toHaveBeenCalled();
+  });
+
+  it("explains the send rate limit", async () => {
+    const { resetPasswordForEmail } = withEmailAuth();
+    resetPasswordForEmail.mockResolvedValue({
+      data: null,
+      error: {
+        message:
+          "For security purposes, you can only request this after 54 seconds.",
+      },
+    });
+
+    const state = await requestPasswordReset(
+      INITIAL_STATE,
+      formDataOf({ email: "ada@example.com" }),
+    );
+
+    expect(state.error).toBe("Wait a minute before requesting another link.");
   });
 });

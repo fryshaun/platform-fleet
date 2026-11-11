@@ -98,7 +98,12 @@ export async function inviteMember(formData: FormData) {
   )}`;
 
   const { data: invited, error: inviteError } =
-    await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
+    await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+      // Available to the template as `{{ index .Data "company_name" }}`, so the
+      // invitation can say which workspace is asking before the person opens it.
+      data: { company_name: context.company.name },
+    });
 
   if (inviteError || !invited.user) {
     redirectWith(slug, settingsSegment("team"), {

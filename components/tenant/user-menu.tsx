@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { initials } from "@/lib/account";
 import { signOut } from "@/lib/actions/auth";
+import type { MfaFactor } from "@/lib/mfa";
 
 type UserMenuProps = {
   name: string | null;
@@ -24,6 +25,8 @@ type UserMenuProps = {
   avatarUrl: string | null;
   /** Whether the account has a password to confirm, or only an OAuth provider. */
   hasPassword: boolean;
+  /** The authenticators and backup codes on the account. */
+  mfa: { enrolled: boolean; factors: MfaFactor[] };
   workspaceName: string;
   roleLabel: string;
 };
@@ -33,6 +36,7 @@ export function UserMenu({
   email,
   avatarUrl,
   hasPassword,
+  mfa,
   workspaceName,
   roleLabel,
 }: UserMenuProps) {
@@ -109,6 +113,7 @@ export function UserMenu({
         fullName={name}
         avatarUrl={avatarUrl}
         hasPassword={hasPassword}
+        mfa={mfa}
       />
     </>
   );

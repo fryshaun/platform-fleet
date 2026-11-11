@@ -9,8 +9,20 @@ import { updateSession } from "@/lib/supabase/proxy";
  * access layer (`lib/auth.ts`) and in Postgres via RLS.
  */
 
-/** Routes that require a signed-in user but are not tenant-scoped. */
-const PROTECTED_ROOT_ROUTES = new Set(["/onboarding", "/workspaces"]);
+/**
+ * Routes that require a signed-in user but are not tenant-scoped.
+ *
+ * `/mfa` and `/mfa/setup` belong here for the same reason `/workspaces` does: a
+ * session at aal1 is still a session, and the pages that raise it to aal2 must
+ * be reachable *by* that session. The gate that sends people to them lives in
+ * the data access layer, not here — see `lib/mfa-server.ts`.
+ */
+const PROTECTED_ROOT_ROUTES = new Set([
+  "/onboarding",
+  "/workspaces",
+  "/mfa",
+  "/mfa/setup",
+]);
 
 /** Auth entry points that a signed-in user should never see. */
 const AUTH_ROUTES = new Set(["/login", "/signup"]);

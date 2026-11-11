@@ -2,9 +2,38 @@ import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serverMock = vi.hoisted(() => ({ createClient: vi.fn() }));
+const recoveryMock = vi.hoisted(() => ({ openRecoveryWindow: vi.fn() }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: serverMock.createClient,
+  /**
+   * Every client the callback sees also has the MFA surface.
+   *
+   * The tests below describe only the methods they are about, and the callback
+   * now ends by asking for the assurance level (see `redirectAfterSignIn`).
+   * Reporting `aal1 → aal1` says "this account has no second factor", so the
+   * handler lands on `next` exactly as it did before two-factor existed; the
+   * tests that care about the challenge live in `tests/unit/mfa-gate.test.ts`.
+   */
+  createClient: async () => {
+    const client = await serverMock.createClient();
+
+    return {
+      ...client,
+      auth: {
+        mfa: {
+          getAuthenticatorAssuranceLevel: async () => ({
+            data: { currentLevel: "aal1", nextLevel: "aal1" },
+            error: null,
+          }),
+        },
+        ...client.auth,
+      },
+    };
+  },
+}));
+
+vi.mock("@/lib/recovery", () => ({
+  openRecoveryWindow: recoveryMock.openRecoveryWindow,
 }));
 
 const { GET } = await import("@/app/auth/callback/route");
@@ -169,6 +198,60 @@ describe("GET /auth/callback", () => {
     const response = await GET(callback("?code=abc"));
 
     expect(locationOf(response)).toBe("https://platform.example.com/workspaces");
+  });
+
+  describe("second factor", () => {
+    /** A client whose account has an authenticator it has not used yet. */
+    function clientNeedingChallenge() {
+      serverMock.createClient.mockResolvedValue({
+        auth: {
+          exchangeCodeForSession: vi.fn(async () => ({ data: {}, error: null })),
+          verifyOtp: vi.fn(async () => ({ data: {}, error: null })),
+          mfa: {
+            getAuthenticatorAssuranceLevel: vi.fn(async () => ({
+              data: { currentLevel: "aal1", nextLevel: "aal2" },
+              error: null,
+            })),
+          },
+        },
+        rpc: vi.fn(async () => ({ data: 0, error: null })),
+      });
+    }
+
+    it("sends a sign-in with an authenticator through /mfa", async () => {
+      clientNeedingChallenge();
+
+      const response = await GET(callback("?code=abc&next=%2Facme%2Fdashboard"));
+
+      // Landing on the page directly would show an app the session has not
+      // finished signing in to.
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/mfa?next=%2Facme%2Fdashboard",
+      );
+    });
+
+    it("asks for the code after an emailed link too", async () => {
+      clientNeedingChallenge();
+
+      const response = await GET(callback("?token_hash=abc&type=magiclink"));
+
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/mfa?next=%2Fworkspaces",
+      );
+    });
+
+    it("lets a recovery link through: the factor is what was lost", async () => {
+      clientNeedingChallenge();
+      recoveryMock.openRecoveryWindow.mockResolvedValue(undefined);
+
+      const response = await GET(
+        callback("?token_hash=abc&type=recovery&next=%2Freset-password"),
+      );
+
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/reset-password",
+      );
+    });
   });
 
   describe("open-redirect protection", () => {
@@ -369,6 +452,65 @@ describe("GET /auth/callback", () => {
       expect(queryOf(response).get("error")).toBe(
         "Email link is invalid or has expired",
       );
+    });
+  });
+
+  describe("password recovery", () => {
+    function withRecovery(messages: (string | null)[] = [null]) {
+      const verifyOtp = vi.fn(async () => {
+        const message = messages.shift() ?? null;
+        return { data: {}, error: message ? { message } : null };
+      });
+      serverMock.createClient.mockResolvedValue({
+        auth: {
+          verifyOtp,
+          exchangeCodeForSession: vi.fn(async () => ({
+            data: {},
+            error: null,
+          })),
+        },
+        rpc: vi.fn(async () => ({ data: 0, error: null })),
+      });
+      return { verifyOtp };
+    }
+
+    it("marks the browser that verified the link", async () => {
+      withRecovery();
+
+      const response = await GET(
+        callback("?token_hash=r1&type=recovery&next=%2Freset-password"),
+      );
+
+      // `/reset-password` will not replace a password without this marker, so
+      // it has to be written only after the token verified — and before the
+      // redirect that follows it.
+      expect(recoveryMock.openRecoveryWindow).toHaveBeenCalledTimes(1);
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/reset-password",
+      );
+    });
+
+    it.each([
+      ["a magic link", "?token_hash=r2&type=magiclink"],
+      ["a sign-up confirmation", "?token_hash=r3&type=signup"],
+      ["an invitation", "?token_hash=r4&type=invite"],
+      ["an OAuth sign-in", "?code=abc"],
+    ])("leaves the marker alone after %s", async (_label, query) => {
+      withRecovery();
+
+      await GET(callback(query));
+
+      // Only a recovery link proves somebody forgot their password.
+      expect(recoveryMock.openRecoveryWindow).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the browser when the token failed", async () => {
+      withRecovery(["Email link is invalid or has expired"]);
+
+      await GET(callback("?token_hash=r5&type=recovery"));
+
+      // A failed verification leaves no session, so there is nothing to reset.
+      expect(recoveryMock.openRecoveryWindow).not.toHaveBeenCalled();
     });
   });
 });

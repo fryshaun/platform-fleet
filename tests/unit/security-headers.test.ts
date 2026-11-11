@@ -45,8 +45,8 @@ describe("security headers", () => {
   });
 
   it("keeps HSTS out of development, where it would pin localhost to https", async () => {
-    // Pinned rather than inherited: `vercel-build` runs this suite with
-    // NODE_ENV=production, so the ambient value says nothing about development.
+    // Pinned rather than inherited: the suite runs on build machines too, where
+    // the ambient value says nothing about a developer's `next dev`.
     vi.stubEnv("NODE_ENV", "development");
 
     expect((await headersFor())["Strict-Transport-Security"]).toBeUndefined();

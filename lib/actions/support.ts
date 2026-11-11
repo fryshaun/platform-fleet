@@ -2,8 +2,10 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 
-import { hasPasswordProvider } from "@/lib/account";
 import { isSectionEnabled, type SectionKey } from "@/lib/features";
+import { toMfaFactors } from "@/lib/mfa";
+import { enforceMfa } from "@/lib/mfa-server";
+import { readHasPassword } from "@/lib/password";
 import {
   canAdminister,
   canFrontDesk,
@@ -60,6 +62,15 @@ export async function getActionContext(slug: string): Promise<ActionContext> {
     redirect("/workspaces");
   }
 
+  // An action re-authorizes itself rather than trusting the page, and the
+  // workspace policy is part of that: a session at aal1 in a workspace that
+  // requires a second factor may not mutate anything either.
+  await enforceMfa(supabase, {
+    factors: toMfaFactors(user.factors),
+    required: company.require_mfa,
+    nextPath: `/${slug}/dashboard`,
+  });
+
   return {
     supabase,
     user: { id: user.id, email: user.email ?? "" },
@@ -81,8 +92,15 @@ export type SessionContext = {
  * take no slug. The row they write is keyed by `auth.uid()` and RLS stops them
  * touching anything else, which is why a plain session is a complete check here
  * — there is no role to look up.
+ *
+ * `challengeSecondFactor: false` is for exactly one caller: setting a password
+ * from a recovery link. That person is at aal1 *because* the authenticator is
+ * what they lost, so sending them to `/mfa` would be a loop they cannot leave.
+ * The recovery cookie the callback wrote is their proof instead.
  */
-export async function getSessionContext(): Promise<SessionContext> {
+export async function getSessionContext(
+  options: { challengeSecondFactor?: boolean } = {},
+): Promise<SessionContext> {
   const supabase = await createClient();
 
   const {
@@ -93,12 +111,27 @@ export async function getSessionContext(): Promise<SessionContext> {
     redirect("/login");
   }
 
+  // No workspace is known here, so only the account-level rule applies: an
+  // account with an authenticator proves it in every session, whether or not the
+  // workspace it was opened from requires one. `required: false` says exactly
+  // that — never ask for enrolment on this path.
+  if (options.challengeSecondFactor !== false) {
+    await enforceMfa(supabase, {
+      factors: toMfaFactors(user.factors),
+      required: false,
+      nextPath: "/workspaces",
+    });
+  }
+
   return {
     supabase,
     user: {
       id: user.id,
       email: user.email ?? "",
-      hasPassword: hasPasswordProvider(user.app_metadata?.providers),
+      hasPassword: await readHasPassword(
+        supabase,
+        user.app_metadata?.providers,
+      ),
     },
   };
 }

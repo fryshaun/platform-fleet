@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { signInLandingPath } from "@/lib/mfa-server";
+import { openRecoveryWindow } from "@/lib/recovery";
 import { safeNextPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/server";
 
@@ -49,6 +51,13 @@ export async function GET(request: NextRequest) {
 
   await dropProviderTokens(supabase, data.session);
 
+  // A recovery link is the only proof that `/reset-password` may replace a
+  // password without the old one, so the browser that verified one is marked
+  // here — after verification, never from a query parameter.
+  if (verification.kind === "token_hash" && verification.type === "recovery") {
+    await openRecoveryWindow();
+  }
+
   // Only an invitation link proves consent to join somebody's workspace.
   // Google, magic-link and signup sessions are ordinary sign-ins, and a
   // membership somebody else created must not activate on the back of one of
@@ -57,7 +66,18 @@ export async function GET(request: NextRequest) {
     await acceptCompanyInvitations(supabase);
   }
 
-  return NextResponse.redirect(`${origin}${next}`);
+  // Everything but a recovery link goes through the second factor when the
+  // account has one. A recovery link is the exception on purpose: the person is
+  // there *because* they lost their only way in, and a lost authenticator is
+  // handled from `/reset-password`, not from `/mfa`.
+  const isRecovery =
+    verification.kind === "token_hash" && verification.type === "recovery";
+
+  const destination = isRecovery
+    ? next
+    : await signInLandingPath(supabase, next);
+
+  return NextResponse.redirect(`${origin}${destination}`);
 }
 
 /**

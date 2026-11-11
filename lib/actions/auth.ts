@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { MIN_PASSWORD_LENGTH, OTP_LENGTH } from "@/lib/auth-policy";
+import { redirectAfterSignIn } from "@/lib/mfa-server";
 import { safeNextPath } from "@/lib/safe-redirect";
 import { getOrigin } from "@/lib/site";
 import { createClient } from "@/lib/supabase/server";
@@ -81,7 +82,9 @@ export async function signInWithEmail(
     return { error: signInMessage(error.message), notice: null };
   }
 
-  redirect(next);
+  // A password is the first factor only. An account with an authenticator lands
+  // on `/mfa` first, then comes back to `next`.
+  return redirectAfterSignIn(supabase, next);
 }
 
 /**
@@ -216,7 +219,50 @@ export async function verifyEmailOtp(
     return { error: verifyCodeMessage(error.message), notice: null };
   }
 
-  redirect(next);
+  return redirectAfterSignIn(supabase, next);
+}
+
+/**
+ * Emails a password-recovery link.
+ *
+ * The link goes through `/auth/callback` like every other email, so the token
+ * is verified in whichever browser opens it and the resulting session is what
+ * `/reset-password` changes the password on. No `next` is accepted: the point
+ * of a reset is the new password, not returning to a deep link.
+ *
+ * The notice is worded conditionally because GoTrue answers the same way for an
+ * address with no account — the response must not reveal which addresses exist.
+ */
+export async function requestPasswordReset(
+  _previousState: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const email = readField(formData, "email");
+
+  if (!email) {
+    return {
+      error: "Enter the email address you signed up with.",
+      notice: null,
+    };
+  }
+
+  const origin = await getOrigin();
+  const supabase = await createClient();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    // `type=recovery` in the template decides that the callback marks the
+    // browser; `next` is what that browser then lands on.
+    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
+  });
+
+  if (error) {
+    return { error: sendLinkMessage(error.message), notice: null };
+  }
+
+  return {
+    error: null,
+    notice: `If ${email} has an account, a reset link is on its way. It expires in an hour and works once.`,
+  };
 }
 
 function signInMessage(message: string): string {

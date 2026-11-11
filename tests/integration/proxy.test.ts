@@ -130,6 +130,22 @@ describe("proxy", () => {
       }
     });
 
+    it("lets the reset page through, so it can explain an expired link", async () => {
+      // A recovery link works in a browser that has never signed in, and the
+      // page itself decides whether the cookie proves anything.
+      expect(isPassThrough(await proxy(request("/reset-password")))).toBe(true);
+    });
+
+    it("bounces the two-factor screens, which need a session to raise", async () => {
+      // `/mfa` is where an aal1 session is sent; an anonymous visitor has no
+      // factor to prove and is sent to sign in first.
+      for (const path of ["/mfa", "/mfa/setup"]) {
+        const response = await proxy(request(path));
+
+        expect(response.headers.get("location"), path).toContain("/login");
+      }
+    });
+
     it("carries rotated auth cookies onto the redirect", async () => {
       // Dropping them here would silently end the session.
       const sessionResponse = NextResponse.next();
@@ -159,6 +175,12 @@ describe("proxy", () => {
         const response = await proxy(request(path));
         expect(redirectTarget(response).pathname, path).toBe("/workspaces");
       }
+    });
+
+    it("leaves the reset page reachable, because recovery signs you in", async () => {
+      // The callback verifies the link and starts a session *before* sending
+      // the browser here, so bouncing it like `/login` would break the flow.
+      expect(isPassThrough(await proxy(request("/reset-password")))).toBe(true);
     });
 
     it("still reconciles auth cookies on the redirect", async () => {
