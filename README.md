@@ -32,14 +32,21 @@ and flips with the theme. `app/icon.svg` is the favicon built from the same
 geometry. The two JPEGs in `public/logos/` are for print and email, where a
 raster is what the medium expects.
 
-| Token           | Value     | Use                                        |
-| --------------- | --------- | ------------------------------------------ |
-| Trackstand Lime | `#B8F200` | Primary actions, active nav, the top rule  |
-| Emerald Core    | `#15803D` | Links on light, success, the dark-mode bar |
-| Deep Forest     | `#0B2818` | Text on light, the page floor in dark      |
-| Night Trail     | `#122119` | Cards and sidebar in dark                  |
-| Chalk White     | `#F6F7F4` | Page floor in light                        |
-| Pure Off-White  | `#FAFAF8` | Body text in dark, inset panels            |
+| Token           | Value      | Use                                                   |
+| --------------- | ---------- | ----------------------------------------------------- |
+| Trackstand Lime | `#B8F200`  | Primary actions, active nav, the top rule             |
+| Emerald Core    | `#15803D`  | Links on light, success, the dark-mode bar            |
+| Deep Forest     | `#0B2818`  | Text on light, and the ink the dark floor is cut from |
+| Night Trail     | `#122119`  | Panels in print and email                             |
+| Chalk White     | `#F6F7F4`  | Page floor in light                                   |
+| Pure Off-White  | `#FAFAF8`  | Light-mode panels, print and email text               |
+
+Dark mode sits one step below that palette, because a full page of Deep Forest
+reads mid-green rather than dark. The floor drops to `#06120C`, the rail to
+`#08160D`, cards and popovers to `#0D1F15`, and body text dims from Pure
+Off-White to `#DFE5DB` (14.9:1 on the floor, 13.4:1 on a card — dimmer, never
+lower contrast). Lime and emerald are unchanged; the darker ground is what lets
+lime clear 15:1 and carry links there.
 
 Three rules the tokens exist to enforce:
 
@@ -54,9 +61,14 @@ Three rules the tokens exist to enforce:
   sizes the mark at 1.11em of the wordmark's font size — the artwork's own ratio
   — and `--logo-bar-center` lifts the centre bar from forest to emerald on dark
   surfaces so it stays legible.
+- **The canvas carries the mark's gesture.** `BrandBackdrop` lays a 1px hatch at
+  the bars' own 69° lean over two radial pools (lime into the top corner,
+  emerald out of the bottom). It is CSS only — no image request, no animation —
+  and the hatch is radially masked so it fades before the reading zone.
 
-Use `BrandLink` for the brand link on any standalone page (landing, auth, 404)
-and `TrackstandStack` for an asset label that needs the mark, the wordmark and a
+Use `BrandLink` for the brand link on any standalone page (landing, auth, 404),
+`BrandBackdrop` as the first child of a `relative isolate` marketing page, and
+`TrackstandStack` for an asset label that needs the mark, the wordmark and a
 serial.
 
 ## Getting started

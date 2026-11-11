@@ -5,6 +5,7 @@ import {
   ShieldCheckIcon,
 } from "lucide-react";
 
+import { BrandBackdrop } from "@/components/brand/brand-backdrop";
 import { BrandLink } from "@/components/brand/brand-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,9 @@ const FEATURES = [
 
 export default function HomePage() {
   return (
-    <div className="flex min-h-svh flex-col">
+    <div className="relative isolate flex min-h-svh flex-col overflow-hidden">
+      <BrandBackdrop />
+
       {/* The lime rule is the brand's signature edge, borrowed from the mark. */}
       <div aria-hidden="true" className="bg-brand-lime h-[3px]" />
 

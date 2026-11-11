@@ -122,49 +122,70 @@
   /* Logo mark fills: lime bars either side of a forest centre bar. */
   --logo-bar-outer: #b8f200;
   --logo-bar-center: #0b2818;
+  /*
+   * Marketing backdrop. The hatch is ink, the glows are brand colour, and all
+   * three stay far enough under body-copy contrast that the texture reads as
+   * paper rather than decoration.
+   */
+  --texture-line: rgb(11 40 24 / 6%);
+  --texture-glow-top: rgb(184 242 0 / 24%);
+  --texture-glow-bottom: rgb(21 128 61 / 8%);
 }
 
 /*
- * Night Trail / Off-White. Deep Forest stays the page floor rather than pure
- * black; cards step up to Night Trail. On dark surfaces lime is bright enough
- * to act as the link colour, so `--link` flips to it here.
+ * Forest Ink. The dark theme sits a step *below* Deep Forest: on a full page the
+ * brand floor reads mid-green, so the floor drops to #06120C and every surface
+ * steps off it faintly — rail, then card, then popover — which is what keeps the
+ * page dark without turning the hierarchy to mush.
+ *
+ * Body text dims from Pure Off-White to chalk (#DFE5DB). It still runs at ~14.5:1
+ * on the floor and ~13:1 on a card: dimmer, never lower contrast. The darker
+ * ground is also why lime can carry links here — it now clears 15:1.
  */
 .dark {
-  --background: #0b2818;
-  --foreground: #fafaf8;
-  --card: #122119;
-  --card-foreground: #fafaf8;
-  --popover: #122119;
-  --popover-foreground: #fafaf8;
+  --background: #06120c;
+  --foreground: #dfe5db;
+  --card: #0d1f15;
+  --card-foreground: #dfe5db;
+  --popover: #0d1f15;
+  --popover-foreground: #dfe5db;
   --primary: #b8f200;
-  --primary-foreground: #0b2818;
-  --secondary: #1b3327;
-  --secondary-foreground: #fafaf8;
-  --muted: #1a2e23;
-  --muted-foreground: #a9b9ae;
-  --accent: #1e3a2a;
-  --accent-foreground: #fafaf8;
+  --primary-foreground: #08160d;
+  --secondary: #132a1c;
+  --secondary-foreground: #dfe5db;
+  --muted: #11241a;
+  --muted-foreground: #93a99a;
+  --accent: #16301f;
+  --accent-foreground: #dfe5db;
   --destructive: #f87171;
-  --border: rgb(250 250 248 / 10%);
-  --input: rgb(250 250 248 / 15%);
+  --border: rgb(223 229 219 / 10%);
+  --input: rgb(223 229 219 / 14%);
   --ring: #15803d;
   --link: #b8f200;
   --chart-1: #b8f200;
   --chart-2: #15803d;
-  --chart-3: #fafaf8;
+  --chart-3: #dfe5db;
   --chart-4: #7fae8f;
   --chart-5: #d9a441;
-  --sidebar: #122119;
-  --sidebar-foreground: #fafaf8;
+  --sidebar: #08160d;
+  --sidebar-foreground: #dfe5db;
   --sidebar-primary: #b8f200;
-  --sidebar-primary-foreground: #0b2818;
-  --sidebar-accent: #1e3a2a;
-  --sidebar-accent-foreground: #fafaf8;
-  --sidebar-border: rgb(250 250 248 / 10%);
+  --sidebar-primary-foreground: #08160d;
+  --sidebar-accent: #16301f;
+  --sidebar-accent-foreground: #dfe5db;
+  --sidebar-border: rgb(223 229 219 / 10%);
   --sidebar-ring: #15803d;
-  /* The centre bar steps up to Emerald so it stays legible on Night Trail. */
+  /* The centre bar steps up to Emerald so it stays legible on the dark floor. */
   --logo-bar-outer: #b8f200;
   --logo-bar-center: #15803d;
+  /*
+   * On a near-black floor the hatch has to be drawn in light ink, and both
+   * glows drop a point: lime blooms across a dark page faster than it does on
+   * Chalk White.
+   */
+  --texture-line: rgb(223 229 219 / 5%);
+  --texture-glow-top: rgb(184 242 0 / 15%);
+  --texture-glow-bottom: rgb(21 128 61 / 26%);
 }
 
 @layer base {
@@ -199,5 +220,55 @@
    */
   option {
     @apply font-sans;
+  }
+}
+
+@layer components {
+  /*
+   * Marketing backdrop, in two parts.
+   *
+   * The hatch is the mark's own gesture: a `-21deg` gradient puts its rules on
+   * the same ~69deg lean as the three bars, so the texture is typographic to the
+   * brand rather than generic noise. A radial mask anchored on the headline fades
+   * it out before the reader reaches the feature copy, and the line is 1px on a
+   * 10px pitch so it never resolves into a stripe.
+   */
+  .brand-hatch {
+    background-image: repeating-linear-gradient(
+      -21deg,
+      var(--texture-line) 0 1px,
+      transparent 1px 10px
+    );
+    -webkit-mask-image: radial-gradient(
+      125% 105% at 80% -14%,
+      #000 0%,
+      rgb(0 0 0 / 45%) 58%,
+      transparent 92%
+    );
+    mask-image: radial-gradient(
+      125% 105% at 80% -14%,
+      #000 0%,
+      rgb(0 0 0 / 45%) 58%,
+      transparent 92%
+    );
+  }
+
+  /*
+   * Two pools of light give the flat canvas a direction: lime spills in behind
+   * the headline, emerald settles under the footer. Both are ellipses wide
+   * enough that no edge is visible on a phone.
+   */
+  .brand-glow {
+    background-image:
+      radial-gradient(
+        60% 50% at 86% -6%,
+        var(--texture-glow-top),
+        transparent 72%
+      ),
+      radial-gradient(
+        52% 36% at 4% 105%,
+        var(--texture-glow-bottom),
+        transparent 70%
+      );
   }
 }
