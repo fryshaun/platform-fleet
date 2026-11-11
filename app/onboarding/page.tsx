@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { BrandLink } from "@/components/brand/brand-link";
 import { CompanyForm } from "@/components/onboarding/company-form";
 import {
   Card,
@@ -23,10 +24,8 @@ export default function OnboardingPage({
   searchParams,
 }: PageProps<"/onboarding">) {
   return (
-    <main className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-6">
-      <Link href="/" className="text-sm font-semibold tracking-tight">
-        Platform
-      </Link>
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6">
+      <BrandLink logoClassName="text-xl" />
 
       <Suspense fallback={<Skeleton className="h-[30rem] w-full max-w-md rounded-xl" />}>
         <OnboardingPanel searchParams={searchParams} />

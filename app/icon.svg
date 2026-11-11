@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Trackstand</title>
+  <rect width="32" height="32" rx="7" fill="#F6F7F4" />
+  <g transform="translate(4 8.6) scale(0.0968)">
+    <path d="M135 0H161L26 154H0Z" fill="#B8F200" />
+    <path d="M181 0H202L67 154H46Z" fill="#0B2818" />
+    <path d="M222 0H248L113 154H87Z" fill="#B8F200" />
+  </g>
+</svg>

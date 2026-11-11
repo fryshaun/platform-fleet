@@ -84,7 +84,10 @@ export function SidebarNav({ items }: { items: readonly NavItem[] }) {
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "text-muted-foreground hover:bg-accent hover:text-accent-foreground flex size-9 items-center justify-center rounded-md transition-colors",
-                    isActive && "bg-accent text-foreground",
+                    // The current section is the one place lime appears in the
+                    // rail: a solid lime tile with a forest glyph.
+                    isActive &&
+                      "bg-brand-lime text-brand-forest hover:bg-brand-lime hover:text-brand-forest",
                   )}
                 >
                   <Icon aria-hidden="true" className="size-4" />

@@ -176,7 +176,7 @@ function MemberControls({
 
 function StatusBadge({ acceptedAt }: { acceptedAt: string | null }) {
   return acceptedAt ? (
-    <Badge variant="secondary">Registered</Badge>
+    <Badge variant="success">Registered</Badge>
   ) : (
     <Badge variant="outline">Invitation sent</Badge>
   );

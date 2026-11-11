@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { BrandLink } from "@/components/brand/brand-link";
 import { RecoveryCodeChallenge } from "@/components/mfa/recovery-code-challenge";
 import { TotpChallenge } from "@/components/mfa/totp-challenge";
 import { Button } from "@/components/ui/button";
@@ -41,10 +41,8 @@ export const metadata: Metadata = {
  */
 export default function MfaPage({ searchParams }: PageProps<"/mfa">) {
   return (
-    <main className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-6">
-      <Link href="/" className="text-sm font-semibold tracking-tight">
-        Platform
-      </Link>
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6">
+      <BrandLink logoClassName="text-xl" />
 
       <Suspense
         fallback={<Skeleton className="h-80 w-full max-w-sm rounded-xl" />}

@@ -10,7 +10,7 @@ import type { ProductStatus } from "@/lib/supabase/types";
 /** The status pill shared by the list and the product page. */
 export function ProductStatusBadge({ status }: { status: ProductStatus }) {
   return (
-    <Badge variant={status === "active" ? "secondary" : "outline"}>
+    <Badge variant={status === "active" ? "brand" : "outline"}>
       {PRODUCT_STATUS_LABELS[status]}
     </Badge>
   );

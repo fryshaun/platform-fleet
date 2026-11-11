@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
+import { BrandLink } from "@/components/brand/brand-link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -30,10 +31,8 @@ export const metadata: Metadata = {
  */
 export default function ResetPasswordPage() {
   return (
-    <main className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-6">
-      <Link href="/" className="text-sm font-semibold tracking-tight">
-        Platform
-      </Link>
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6">
+      <BrandLink logoClassName="text-xl" />
 
       <Suspense
         fallback={<Skeleton className="h-80 w-full max-w-sm rounded-xl" />}
