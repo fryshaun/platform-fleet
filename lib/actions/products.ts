@@ -93,9 +93,31 @@ function productPath(formData: FormData): string {
   return handle ? `products/${handle}` : "products";
 }
 
-/** Reads and validates the fields shared by create and update. */
+/**
+ * Where a failed create returns to.
+ *
+ * The same fields are posted from two places: the slideout on the index and the
+ * standalone `/products/new` page. A hidden `surface=panel` says which one, so
+ * the error lands back in the form the author was using instead of closing the
+ * panel and handing them a different page. A flag rather than a path, so nothing
+ * the browser sends can steer the redirect.
+ */
+function createErrorPath(formData: FormData): string {
+  return readField(formData, "surface") === "panel"
+    ? "products"
+    : "products/new";
+}
+
+/**
+ * Reads and validates the fields shared by create and update.
+ *
+ * `defaultCurrency` is the workspace's own default, used when the form did not
+ * send one — the same value the form pre-fills, so a browser that drops the field
+ * cannot quietly fall back to dollars for a euro workspace.
+ */
 function readProductDraft(
   formData: FormData,
+  defaultCurrency: string,
 ): { draft: ProductDraft } | { error: string } {
   const title = readField(formData, "title");
   if (title.length < 2) {
@@ -138,7 +160,12 @@ function readProductDraft(
     return { error: "Choose how this product is stocked." };
   }
 
-  const currency = readField(formData, "currency") || "usd";
+  // A workspace whose default is not one of the codes this build offers (an older
+  // row, or a hand-written URL) falls back to dollars rather than writing a
+  // currency the form cannot show afterwards.
+  const currency =
+    readField(formData, "currency") ||
+    (isProductCurrency(defaultCurrency) ? defaultCurrency : "usd");
   if (!isProductCurrency(currency)) {
     return { error: "Choose a currency from the list." };
   }
@@ -176,9 +203,9 @@ export async function createProduct(formData: FormData) {
   requireManager(context, slug);
   requireSection(context, slug, "products");
 
-  const parsed = readProductDraft(formData);
+  const parsed = readProductDraft(formData, context.company.currency);
   if ("error" in parsed) {
-    redirectWith(slug, "products/new", { error: parsed.error });
+    redirectWith(slug, createErrorPath(formData), { error: parsed.error });
   }
 
   const { error } = await context.supabase.from("products").insert({
@@ -191,7 +218,7 @@ export async function createProduct(formData: FormData) {
   });
 
   if (error) {
-    redirectWith(slug, "products/new", {
+    redirectWith(slug, createErrorPath(formData), {
       error: writeErrorMessage(error, "That product address is already in use."),
     });
   }
@@ -214,7 +241,7 @@ export async function updateProduct(formData: FormData) {
   }
 
   const back = productPath(formData);
-  const parsed = readProductDraft(formData);
+  const parsed = readProductDraft(formData, context.company.currency);
   if ("error" in parsed) {
     redirectWith(slug, back, { error: parsed.error });
   }
@@ -672,7 +699,7 @@ export async function createMediaUploadUrl(input: {
   if (!isSectionEnabled(context.company, "products")) {
     return {
       ok: false,
-      message: "That section is not enabled for this workspace.",
+      message: "That extension is not enabled for this workspace.",
     };
   }
 
@@ -745,7 +772,7 @@ export async function recordMediaUpload(input: {
   if (!isSectionEnabled(context.company, "products")) {
     return {
       ok: false,
-      message: "That section is not enabled for this workspace.",
+      message: "That extension is not enabled for this workspace.",
     };
   }
 

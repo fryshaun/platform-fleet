@@ -244,7 +244,7 @@ describe("inviteMember", () => {
       invited_at: expect.any(String),
       accepted_at: null,
     });
-    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme/settings");
+    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme/settings/team");
     expect(redirectParams(url).get("ok")).toBe(
       "Invitation sent to new.person@example.com.",
     );

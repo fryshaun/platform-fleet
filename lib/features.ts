@@ -5,9 +5,12 @@ import type { Tables } from "@/lib/supabase/types";
  *
  * A section is a whole area of the app — routes, tables and Server Actions —
  * that a workspace may not need. `companies.enabled_sections` holds the keys a
- * workspace has turned on, an owner or admin edits that list on Settings, and
- * the database asks `has_company_section()` in every policy of the section. So
- * the switch *hides* a section without ever deleting its rows.
+ * workspace has turned on, an owner or admin edits that list under Settings →
+ * Extensions, and the database asks `has_company_section()` in every policy of
+ * the section. So the switch *hides* a section without ever deleting its rows.
+ *
+ * "Extension" is the word the UI uses. The keys, the column and the SQL helper
+ * keep "section" so stored rows and policies cannot drift from the code.
  *
  * This module is free of `server-only`, React and database imports so that both
  * Server and Client Components can read the same labels, and so that the icon
@@ -54,7 +57,7 @@ export const SECTIONS: Record<SectionKey, SectionDefinition> = {
   },
 };
 
-/** The checklist on Settings → Sections. */
+/** The checklist on Settings → Extensions. */
 export const SECTION_OPTIONS = SECTION_KEYS.map((key) => ({
   value: key,
   label: SECTIONS[key].label,

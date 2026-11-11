@@ -65,7 +65,11 @@ async function NewProductContent({
         }
       />
 
-      <ProductForm slug={company.slug} categories={categories ?? []} />
+      <ProductForm
+        slug={company.slug}
+        categories={categories ?? []}
+        defaultCurrency={company.currency}
+      />
     </div>
   );
 }

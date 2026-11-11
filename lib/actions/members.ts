@@ -9,6 +9,7 @@ import {
   requireAdministrator,
 } from "@/lib/actions/support";
 import { isAssignableRole, ROLE_LABELS } from "@/lib/roles";
+import { settingsPath, settingsSegment } from "@/lib/settings";
 import { getOrigin } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -40,10 +41,10 @@ export async function inviteMember(formData: FormData) {
   const role = readField(formData, "role");
 
   if (!EMAIL_PATTERN.test(email)) {
-    redirectWith(slug, "settings", { error: "Enter a valid email address." });
+    redirectWith(slug, settingsSegment("team"), { error: "Enter a valid email address." });
   }
   if (!isAssignableRole(role)) {
-    redirectWith(slug, "settings", { error: "Choose a role for this person." });
+    redirectWith(slug, settingsSegment("team"), { error: "Choose a role for this person." });
   }
 
   const admin = createAdminClient();
@@ -57,7 +58,7 @@ export async function inviteMember(formData: FormData) {
     .maybeSingle();
 
   if (profileError) {
-    redirectWith(slug, "settings", { error: profileError.message });
+    redirectWith(slug, settingsSegment("team"), { error: profileError.message });
   }
 
   if (profile) {
@@ -69,7 +70,7 @@ export async function inviteMember(formData: FormData) {
       .maybeSingle();
 
     if (existing) {
-      redirectWith(slug, "settings", {
+      redirectWith(slug, settingsSegment("team"), {
         error: `${email} is already in this workspace.`,
       });
     }
@@ -84,11 +85,11 @@ export async function inviteMember(formData: FormData) {
     });
 
     if (error) {
-      redirectWith(slug, "settings", { error: membershipErrorMessage(error) });
+      redirectWith(slug, settingsSegment("team"), { error: membershipErrorMessage(error) });
     }
 
-    revalidatePath(`/${slug}/settings`);
-    redirectWith(slug, "settings", { ok: invitationSentMessage(email) });
+    revalidatePath(settingsPath(slug, "team"));
+    redirectWith(slug, settingsSegment("team"), { ok: invitationSentMessage(email) });
   }
 
   const origin = await getOrigin();
@@ -100,7 +101,7 @@ export async function inviteMember(formData: FormData) {
     await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
 
   if (inviteError || !invited.user) {
-    redirectWith(slug, "settings", {
+    redirectWith(slug, settingsSegment("team"), {
       error: inviteErrorMessage(
         inviteError?.message ?? "Could not send the invitation.",
       ),
@@ -132,13 +133,13 @@ export async function inviteMember(formData: FormData) {
       }
     }
 
-    redirectWith(slug, "settings", {
+    redirectWith(slug, settingsSegment("team"), {
       error: membershipErrorMessage(membershipError),
     });
   }
 
-  revalidatePath(`/${slug}/settings`);
-  redirectWith(slug, "settings", { ok: invitationSentMessage(email) });
+  revalidatePath(settingsPath(slug, "team"));
+  redirectWith(slug, settingsSegment("team"), { ok: invitationSentMessage(email) });
 }
 
 /** Changes an assignable membership between manager, staff and viewer. */
@@ -151,10 +152,10 @@ export async function updateMemberRole(formData: FormData) {
   const role = readField(formData, "role");
 
   if (!membershipId) {
-    redirectWith(slug, "settings", { error: "Missing team member." });
+    redirectWith(slug, settingsSegment("team"), { error: "Missing team member." });
   }
   if (!isAssignableRole(role)) {
-    redirectWith(slug, "settings", { error: "Choose a valid role." });
+    redirectWith(slug, settingsSegment("team"), { error: "Choose a valid role." });
   }
 
   const { data: member } = await context.supabase
@@ -165,10 +166,10 @@ export async function updateMemberRole(formData: FormData) {
     .maybeSingle();
 
   if (!member) {
-    redirectWith(slug, "settings", { error: "That team member was not found." });
+    redirectWith(slug, settingsSegment("team"), { error: "That team member was not found." });
   }
   if (!isAssignableRole(member.role)) {
-    redirectWith(slug, "settings", {
+    redirectWith(slug, settingsSegment("team"), {
       error: "Owner and admin roles cannot be changed here.",
     });
   }
@@ -180,11 +181,11 @@ export async function updateMemberRole(formData: FormData) {
     .eq("company_id", context.company.id);
 
   if (error) {
-    redirectWith(slug, "settings", { error: error.message });
+    redirectWith(slug, settingsSegment("team"), { error: error.message });
   }
 
-  revalidatePath(`/${slug}/settings`);
-  redirectWith(slug, "settings", {
+  revalidatePath(settingsPath(slug, "team"));
+  redirectWith(slug, settingsSegment("team"), {
     ok: `Role updated to ${ROLE_LABELS[role]}.`,
   });
 }
@@ -197,7 +198,7 @@ export async function removeMember(formData: FormData) {
 
   const membershipId = readField(formData, "membership_id");
   if (!membershipId) {
-    redirectWith(slug, "settings", { error: "Missing team member." });
+    redirectWith(slug, settingsSegment("team"), { error: "Missing team member." });
   }
 
   const { data: member } = await context.supabase
@@ -208,10 +209,10 @@ export async function removeMember(formData: FormData) {
     .maybeSingle();
 
   if (!member) {
-    redirectWith(slug, "settings", { error: "That team member was not found." });
+    redirectWith(slug, settingsSegment("team"), { error: "That team member was not found." });
   }
   if (!isAssignableRole(member.role)) {
-    redirectWith(slug, "settings", {
+    redirectWith(slug, settingsSegment("team"), {
       error: "Owner and admin roles cannot be removed here.",
     });
   }
@@ -223,11 +224,11 @@ export async function removeMember(formData: FormData) {
     .eq("company_id", context.company.id);
 
   if (error) {
-    redirectWith(slug, "settings", { error: error.message });
+    redirectWith(slug, settingsSegment("team"), { error: error.message });
   }
 
-  revalidatePath(`/${slug}/settings`);
-  redirectWith(slug, "settings", { ok: "Team member removed." });
+  revalidatePath(settingsPath(slug, "team"));
+  redirectWith(slug, settingsSegment("team"), { ok: "Team member removed." });
 }
 
 function membershipErrorMessage(error: { message: string; code?: string }) {

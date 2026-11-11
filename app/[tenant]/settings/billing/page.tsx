@@ -1,12 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { PlanPicker } from "@/components/billing/plan-picker";
 import { FormMessage } from "@/components/form-message";
-import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
+import { PageSkeleton } from "@/components/tenant/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +17,6 @@ import {
   openBillingPortal,
   startSubscriptionCheckout,
 } from "@/lib/actions/billing";
-import { getTenantContext } from "@/lib/auth";
-import { canAdminister } from "@/lib/roles";
 import {
   hasLiveSubscription,
   isSubscriptionActive,
@@ -30,6 +25,9 @@ import {
 import { formatStripePrice, type SubscriptionPlan } from "@/lib/plans";
 import { readParam } from "@/lib/search-params";
 import { listSubscriptionPlans } from "@/lib/subscriptions";
+
+import { requireSettingsAccess } from "../settings-access";
+import { SettingsHeader } from "../settings-header";
 
 export const metadata: Metadata = {
   title: "Billing",
@@ -55,17 +53,8 @@ async function BillingContent({
   params: PageProps<"/[tenant]/settings/billing">["params"];
   searchParams: PageProps<"/[tenant]/settings/billing">["searchParams"];
 }) {
-  // Creating the client starts `auth-js`' session recovery, which reads the
-  // current time. Render at request time so that read does not happen while
-  // prerendering, where it is reported as an unstable value.
-  await connection();
-
   const [{ tenant }, query] = await Promise.all([params, searchParams]);
-  const { company: stored, role } = await getTenantContext(tenant);
-
-  if (!canAdminister(role)) {
-    notFound();
-  }
+  const { company: stored } = await requireSettingsAccess(tenant);
 
   // Stripe is the source of truth, so the stored row is re-read on every visit.
   // A webhook delivery that never arrived can then only make this page stale for
@@ -97,15 +86,11 @@ async function BillingContent({
       : undefined);
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6 lg:p-10">
-      <PageHeader
-        title="Billing"
+    <div className="mx-auto w-full max-w-5xl space-y-6 p-6 lg:p-10">
+      <SettingsHeader
+        slug={company.slug}
+        current="billing"
         description="Your subscription, invoices and payment method."
-        actions={
-          <Button variant="ghost" asChild>
-            <Link href={`/${company.slug}/settings`}>Back to settings</Link>
-          </Button>
-        }
       />
 
       <FormMessage error={readParam(query.error)} success={success} />

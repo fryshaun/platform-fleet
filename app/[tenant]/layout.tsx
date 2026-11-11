@@ -15,12 +15,12 @@ export default function TenantLayout({
   params,
 }: LayoutProps<"/[tenant]">) {
   return (
-    <div className="flex min-h-svh">
+    <div className="flex min-h-svh bg-sidebar">
       <Suspense fallback={<SidebarFallback />}>
         <TenantSidebarSlot params={params} />
       </Suspense>
 
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col border rounded-r-none rounded-t-2xl mt-2 bg-background">{children}</div>
     </div>
   );
 }

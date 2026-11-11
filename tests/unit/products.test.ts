@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CATEGORY_SORT_OPTIONS,
   categoryHandleProblem,
+  categorySearchTerm,
   dateRangeProblem,
   deriveHandle,
   familyPriceLabel,
@@ -18,8 +20,11 @@ import {
   PRODUCT_MEDIA_ACCEPT,
   PRODUCT_MEDIA_MAX_BYTES,
   PRODUCT_MEDIA_TYPES,
+  PRODUCT_SORT_OPTIONS,
   productHandleProblem,
   productMediaPath,
+  readCategorySort,
+  readProductSort,
 } from "@/lib/products";
 
 import { COMPANY_ID, productRow, PRODUCT_ID } from "../helpers/fixtures";
@@ -199,6 +204,67 @@ describe("familyPriceLabel", () => {
       variants: [productRow({ id: "cheap", price_cents: 900 })],
     };
     expect(familyPriceLabel(family)).toBe("From $9.00");
+  });
+});
+
+describe("readProductSort", () => {
+  it("keeps a known order", () => {
+    for (const option of PRODUCT_SORT_OPTIONS) {
+      expect(readProductSort(option.value)).toBe(option.value);
+    }
+  });
+
+  it("falls back to the title for anything else", () => {
+    // An unknown `?sort=` is a stale bookmark, not an error: the catalogue
+    // renders in its default order instead of refusing to render at all.
+    for (const value of ["", "handle", "TITLE", null, undefined, 2]) {
+      expect(readProductSort(value)).toBe("title");
+    }
+  });
+
+  it("starts with the title, so the default needs no query", () => {
+    expect(PRODUCT_SORT_OPTIONS[0].value).toBe("title");
+  });
+});
+
+describe("readCategorySort", () => {
+  it("keeps a known order", () => {
+    for (const option of CATEGORY_SORT_OPTIONS) {
+      expect(readCategorySort(option.value)).toBe(option.value);
+    }
+  });
+
+  it("falls back to the shelf order for anything else", () => {
+    for (const value of [undefined, "", "position-asc", "products"]) {
+      expect(readCategorySort(value)).toBe("position");
+    }
+  });
+
+  it("starts with the shelf order, so the default needs no query", () => {
+    expect(CATEGORY_SORT_OPTIONS[0].value).toBe("position");
+  });
+});
+
+describe("categorySearchTerm", () => {
+  it("keeps a plain term", () => {
+    expect(categorySearchTerm("hot drinks")).toBe("hot drinks");
+    expect(categorySearchTerm("  hot   drinks ")).toBe("hot drinks");
+  });
+
+  it("drops the characters PostgREST would read as syntax", () => {
+    // `,` ends a predicate inside `or()`, `()` group, `%` and `*` are LIKE
+    // wildcards and `\` escapes them: none may reach the filter string.
+    expect(categorySearchTerm("tea,coffee")).toBe("tea coffee");
+    expect(categorySearchTerm("(beans)")).toBe("beans");
+    expect(categorySearchTerm("100%")).toBe("100");
+    expect(categorySearchTerm("hot*")).toBe("hot");
+    expect(categorySearchTerm("a\\b")).toBe("a b");
+  });
+
+  it("treats a term of nothing but syntax as no search", () => {
+    for (const value of ["", "   ", "%%", "*", ",()", undefined, 42]) {
+      expect(categorySearchTerm(value)).toBeNull();
+    }
   });
 });
 

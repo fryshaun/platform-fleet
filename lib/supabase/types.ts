@@ -87,6 +87,9 @@ export type Database = {
           subscription_status: SubscriptionStatus;
           trial_ends_at: string | null;
           enabled_sections: string[];
+          currency: string;
+          logo_url: string | null;
+          badge: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -99,6 +102,9 @@ export type Database = {
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
           enabled_sections?: string[];
+          currency?: string;
+          logo_url?: string | null;
+          badge?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -111,6 +117,9 @@ export type Database = {
           subscription_status?: SubscriptionStatus;
           trial_ends_at?: string | null;
           enabled_sections?: string[];
+          currency?: string;
+          logo_url?: string | null;
+          badge?: string | null;
           created_at?: string;
           updated_at?: string;
         };

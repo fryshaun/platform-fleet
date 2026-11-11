@@ -11,14 +11,17 @@ import { updateEnabledSections } from "@/lib/actions/settings";
 import { SECTION_OPTIONS } from "@/lib/features";
 
 /**
- * The section checklist.
+ * The extension checklist.
+ *
+ * An "extension" is the UI word for a switchable section of the app; the
+ * database, the policies and `lib/features.ts` still call it a section.
  *
  * Plain checkboxes in one form: submitting it sends the whole selection, so the
  * action can write the row as an absolute list instead of applying deltas to it.
- * The list itself comes from `lib/features.ts`, which is why adding a section
+ * The list itself comes from `lib/features.ts`, which is why adding an extension
  * needs no change here.
  */
-export function SectionsSection({
+export function ExtensionsSection({
   slug,
   enabled,
 }: {
@@ -28,7 +31,7 @@ export function SectionsSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Sections</CardTitle>
+        <CardTitle>Extensions</CardTitle>
         <CardDescription>
           Optional parts of this workspace. Switching one off hides it from
           everyone — including the navigation — without deleting anything;
@@ -43,7 +46,7 @@ export function SectionsSection({
             {SECTION_OPTIONS.map((section) => (
               <li key={section.value} className="flex items-start gap-3 px-4 py-3">
                 <input
-                  id={`section-${section.value}`}
+                  id={`extension-${section.value}`}
                   name="section"
                   type="checkbox"
                   value={section.value}
@@ -51,7 +54,7 @@ export function SectionsSection({
                   className="accent-primary mt-1 size-4"
                 />
                 <div className="min-w-0 space-y-1">
-                  <Label htmlFor={`section-${section.value}`}>
+                  <Label htmlFor={`extension-${section.value}`}>
                     {section.label}
                   </Label>
                   <p className="text-muted-foreground text-xs">
@@ -62,7 +65,7 @@ export function SectionsSection({
             ))}
           </ul>
 
-          <Button type="submit">Save sections</Button>
+          <Button type="submit">Save extensions</Button>
         </form>
       </CardContent>
     </Card>

@@ -88,6 +88,16 @@ pnpm dev
    `status_changed_at` trigger, and a policy per verb. It asks
    `has_company_section(company_id, 'assets')`, never the products key, so the
    two sections switch independently.
+   `20260101000400_account_avatars.sql` adds the public `avatars` bucket behind
+   the account photo: 2 MB per object, four image types, and a policy per verb
+   comparing the first path segment with `auth.uid()`. No company is consulted —
+   a photo follows the person between workspaces.
+   `20260101000500_company_identity.sql` adds what a workspace looks like and what
+   it sells in: `companies.currency` (the default the product form pre-fills, with
+   the same `^[a-z]{3}$` rule as `products.currency`), `companies.badge`, and
+   `companies.logo_url` behind the public `company-logos` bucket. Writes are keyed
+   `<company-id>/<uuid>.<ext>` and allowed to owners and admins only; every member
+   can read the mark, and no section check is involved — identity is not optional.
 
    A feature module adds its own numbered migration; it never edits the ones
    before it.
@@ -281,11 +291,17 @@ Tests must pass before anything deploys:
    re-reads the subscription from Stripe on the billing page and on a dashboard
    visit whose stored status has not settled, so a missed webhook cannot leave a
    paying company looking unpaid.
-4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
+4. `/{slug}/dashboard` is the workspace. At the top of the rail sits the
+   workspace mark — the uploaded logo, or the badge, or the initials of the name
+   (see *Workspace identity*). The rail carries the dashboard plus the
    optional sections the workspace has switched on; **Products** and **Assets**
    are off until an owner or admin enables them on `/{slug}/settings` →
-   Sections. Settings and billing live in the account menu at the foot of the
-   rail, and both are owner/admin-only — a manager or viewer sees neither.
+   Extensions. Screens that belong to a section but are gated more tightly hang
+   off it in the rail: **Categories** sits next to Products and is drawn only for
+   managers and up, because that page is manager-only. Above the theme switch and
+   the avatar sits a **gear** that opens `/{slug}/settings`, drawn only for owner
+   and admin. The avatar menu itself holds only what belongs to the person: their
+   own settings (a sheet with photo, name and password) and signing out.
 
 ## Team roles and invitations
 
@@ -341,11 +357,83 @@ That badge means "Supabase accepted the send request" and "the person has
 accepted", not "the email was delivered". Delivery confirmation would need an
 email-provider webhook; the app deliberately does not pretend to have one.
 
+## Your account
+
+The avatar at the foot of the rail holds what belongs to the *person* rather than
+to a workspace, and **User settings** opens a sheet — not a route. There is no
+`/account` URL because there is nothing to link to: the sheet is one person's
+business, and a page would mean losing your place on whatever you were doing.
+
+- **Photo** — the browser uploads straight to the public `avatars` bucket through
+  a signed URL (`createAvatarUploadUrl`), and `setAvatar` records the result in
+  `profiles.avatar_url`. Objects are keyed `<user-id>/<uuid>.<ext>`, and every
+  policy in migration 05 compares that first segment with `auth.uid()`, so a
+  session can only write into its own folder. The object it replaces is deleted,
+  so changing a photo ten times leaves one file. 2 MB, PNG/JPEG/WebP/AVIF.
+- **Name** — `profiles.full_name`, trimmed and with runs of spaces collapsed; an
+  empty field is stored as `null`, which every reader treats as "use the email
+  address". The rail, the team list and the menus all read it through
+  `getCurrentUser()`, so the action invalidates the tree from the root layout
+  down (`revalidatePath("/", "layout")`).
+- **Password** — `changePassword` asks for the current password and re-proves it
+  with `signInWithPassword` before calling `auth.updateUser`. Without that step a
+  borrowed browser could change the password that protects the account. An
+  account that signs in with Google has `app_metadata.providers = ["google"]`,
+  so `SessionUser.hasPassword` is false and the form offers "set a password"
+  instead — there is nothing to confirm.
+
+Two limits are worth knowing before you change this:
+
+- These actions **answer** (`useActionState`) instead of redirecting, because a
+  redirect would close the sheet and navigate the page underneath. Every other
+  action in the app redirects with `?error=`/`?ok=`.
+- With Supabase's **Secure password change** setting switched on, GoTrue rejects
+  `updateUser` without a nonce from `reauthenticate()`. Leave it off, or extend
+  `changePassword` to fetch and use one. Changing the email address, and the
+  forgot-password flow, deliberately stay in Supabase's own email templates.
+
+## Workspace identity
+
+A workspace is drawn as a square in two places — the top of the rail and each row
+of `/workspaces` — and both use the same `CompanyMark` component, so they cannot
+disagree about what it shows. Three sources, in this order:
+
+1. **Logo** — `companies.logo_url`, uploaded from Settings → Company. The browser
+   uploads straight to the public `company-logos` bucket through a signed URL
+   (`createLogoUploadUrl`) and `setCompanyLogo` records the result. Objects are
+   keyed `<company-id>/<uuid>.<ext>`, the object it replaces is deleted, and 2 MB /
+   PNG / JPEG / WebP / AVIF are the limits. The folder check is repeated in the
+   action, so a modified client cannot point the column at another workspace's
+   file.
+2. **Badge** — `companies.badge`: one or two characters, or a single emoji. This
+   is the field a workspace that does not want to upload anything uses: `AB`, `A`,
+   `🚀`, `🇬🇧`. It is counted in *graphemes* (`Intl.Segmenter`), so a flag or a
+   family emoji is one character rather than the seven code points it is made of;
+   internal whitespace is refused, because the square would collapse it.
+3. **Initials** — `initials(companies.name)`, which is also what an empty badge
+   means. A workspace that never opens this screen is therefore never blank.
+
+Two consequences worth knowing:
+
+- **Both `updateCompany` and the logo actions revalidate the root layout**
+  (`revalidatePath("/", "layout")`), not the tenant. `/workspaces` lists every
+  workspace a person belongs to, so a tenant-scoped invalidation would leave a
+  renamed or re-badged company stale on the chooser. The extensions switch stays
+  tenant-scoped, because nothing outside the tenant draws it.
+- **The logo actions answer instead of redirecting**, like the account ones: they
+  are called from a form on a settings page, and a redirect would throw away the
+  message. The default currency and the badge are ordinary fields of the
+  `updateCompany` form post.
+
+Settings → Company is owner/admin only, which is the same gate the row's policy
+already enforced: the update policy on `companies` is `has_company_role(owner,
+admin)`, so no new grant was needed for the three columns.
+
 ## The products section
 
 `app/[tenant]/products/` is the template's first domain module and the worked
 example of a *switchable* section. It is off until an owner or admin turns it on
-under **Settings → Sections**; while it is off its routes `notFound()` and every
+under **Settings → Extensions**; while it is off its routes `notFound()` and every
 policy refuses the rows, so it behaves like a part of the app that does not
 exist for that workspace. Switching it back on brings the same rows back —
 nothing is deleted, ever.
@@ -373,6 +461,11 @@ Three decisions are worth explaining, because they shape everything else:
 - **Money is stored in the currency's minor unit** (`price_cents`), the same
   convention as `lib/plans.ts`, and formatted through `formatPlanPrice` so the
   catalogue and the billing page print prices the same way.
+- **The currency defaults, it is not imposed.** `companies.currency` (Settings →
+  Company) is only the value the create form pre-selects, and the fallback the
+  action uses when a request arrives without the field. Every product keeps its
+  own `products.currency`, so changing the workspace default re-prices nothing
+  that already exists.
 
 Every child row is keyed on `(company_id, …)` rather than on an id alone:
 `foreign key (company_id, product_id) references products (company_id, id)`. A
@@ -380,6 +473,47 @@ row therefore cannot point at another tenant's row even if a policy were wrong,
 because the key itself refuses it. Deleting a category leaves its products
 behind, uncategorised (`on delete set null (category_id)`); deleting a product
 cascades to its variants, dates and gallery rows.
+
+### The catalogue index
+
+`/products` is a deck of cards, one per product family, with a filter form above
+it. Three decisions keep it from becoming a JavaScript page:
+
+- **The filters are a plain `GET` form.** Status, category and order arrive as
+  `?status=`, `?category=` and `?sort=` and are applied in SQL, so a long
+  catalogue renders in one request and the page works with no JavaScript. An
+  unknown value reads as "no filter" or "default order" rather than as an error
+  (`readProductSort` in `lib/products.ts`), so a stale bookmark still renders.
+- **Creating one happens in a slideout, not on its own page.** The header button
+  is `components/tenant/form-sheet.tsx`, shared with the assets section; the
+  fields inside it are the same `ProductFields` the edit card uses, rendered on
+  the server and handed in as children. The footer's submit button sits outside
+  the `<form>` and reaches it with `form={NEW_PRODUCT_FORM_ID}`, which is why the
+  id is a constant in `lib/products.ts` rather than a literal in two files.
+- **The cards lead with a picture.** `firstImagePerProduct()` in
+  `lib/product-media.ts` reads the gallery once per page for every product on it
+  and resolves `url` or the public `storage_path` into a plain URL, falling back
+  to the first variant that has one.
+
+A create that fails is redirected back with `?error=`, and to the surface the
+form was posted from: a hidden `surface=panel` field sends it to the index, so
+the panel reopens with the message instead of closing and landing the author on
+a different page. `/products/new` is still there as the full-page form (and the
+no-JavaScript path), and it posts `surface=page`.
+
+`/products/categories` is built the same way, so the two screens read alike. The
+search box and the order are `?q=` and `?sort=` and are applied in SQL — except
+"most products", which needs the per-category counts the page derives, so that
+one order is applied once the rows are in. `categorySearchTerm()` in
+`lib/products.ts` is what keeps a typed query safe to splice into PostgREST's
+`or()` filter. The header button opens the same `FormSheet` around
+`CategoryFields`, and the footer submits through `NEW_CATEGORY_FORM_ID`.
+
+One thing differs, because a category has no page of its own: a card *is* its
+edit form. `CategoryFields` therefore owns the `<form>` and takes a slot for the
+buttons that belong to it, and the card's Delete button posts `deleteCategory`
+from inside that form with `formAction` — one row of fields and two buttons,
+without nesting a `<form>` inside a `<form>`.
 
 ### Who may do what
 
@@ -429,7 +563,7 @@ shape from the first: it records *physical* things, it reads one column of anoth
 module, and its day-to-day writer is the front desk rather than a manager.
 
 It switches on the same way — an owner or admin ticks **Assets** under
-**Settings → Sections** — and while it is off its routes `notFound()` and every
+**Settings → Extensions** — and while it is off its routes `notFound()` and every
 policy refuses the rows. Nothing is deleted, ever.
 
 ### What it stores
@@ -624,6 +758,13 @@ breaks every other project on the same port.
   the top level.
 - **`app/layout.tsx`** is the only owner of `<html>`/`<body>`. `app/[tenant]/`
   wraps content only.
+- **`app/globals.css`** owns the font stack. `--font-sans` and `--font-mono`
+  splice next/font's generated families in front of Tailwind's generics, and
+  `option` is given the stack by name. A `<select>`'s option list is drawn by the
+  browser in a popup outside the page's inheritance chain, so a family list that
+  ends at two `@font-face` names has nowhere to fall back to and the popup picks
+  the browser default — a serif on Windows. Everything else inherits, which is why
+  no individual control carries `font-sans`.
 - **`lib/roles.ts`** holds `ROLE_LABELS`, the assignable role list and the
   `canAdminister`/`canManage`/`canFrontDesk` predicates. It is framework-free so
   the sidebar, pages and Server Actions share one hierarchy; Postgres RLS is the
@@ -631,7 +772,7 @@ breaks every other project on the same port.
 - **`lib/features.ts`** is the section registry: `SECTION_KEYS`, the labels and
   paths the rail and Settings render, and `isSectionEnabled`. The stored switch is
   `companies.enabled_sections` (`text[]`), which an owner or admin edits on
-  Settings → Sections. The database repeats that check in
+  Settings → Extensions. The database repeats that check in
   `has_company_section()`, so the helper decides what the UI *offers* and RLS
   decides what is *reachable*. Adding a section is one entry here plus its routes
   and policies; nothing else enumerates sections. Tier gating, when it comes,
@@ -698,22 +839,36 @@ app/
     layout.tsx                   # icon rail shell + account menu
     page.tsx                     # redirects to the dashboard
     dashboard/                   # the workspace overview
-    products/                    # products section (categories, variants, stock, gallery)
-    products/new/                # create a product
+    products/                    # catalogue deck, filters and the create panel
+    products/new/                # the full-page create form (no-JS fallback)
     products/[handle]/           # details, stock, dates, variants, gallery
-    products/categories/         # aisle management
-    assets/                      # assets section (the units behind a product)
+    products/categories/         # aisles: search, sorted deck of edit cards
+    assets/                      # fleet deck, filters and the create panel
     assets/[handle]/             # status, product assignment, removal
     fields.ts                    # shared class strings for native form controls
-    settings/                    # company + sections + team cards
+    settings/                    # gear: company details (the index tab)
+    settings/extensions/         # which optional parts of the app are switched on
+    settings/team/               # invitations and roles
     settings/billing/            # plan, portal, invoices
 components/
   tenant/{sidebar-nav,tenant-sidebar,user-menu,page-header}.tsx
+  tenant/tab-nav.tsx             # the settings tab strip: links, not local state
+  tenant/settings-link.tsx       # the gear, drawn for owner and admin only
+  tenant/user-settings-sheet.tsx # photo, name and password, from the avatar menu
+  tenant/avatar-uploader.tsx     # signed upload straight to the avatars bucket
+  tenant/company-mark.tsx        # logo → badge → initials, in the rail and the chooser
+  tenant/company-logo-uploader.tsx # signed upload to the company-logos bucket
+  tenant/form-sheet.tsx          # the shared "new …" slideout
 lib/
   auth.ts                        # session + tenancy data access layer
+  account.ts                     # name, password and avatar rules (client-safe)
+  company.ts                     # badge, mark and logo rules (client-safe)
+  uploads.ts                     # image types, path checks, public URL parsing
+  settings.ts                    # settings tabs: labels and paths (client-safe)
   features.ts                    # optional-section registry + switch (client-safe)
   assets.ts                      # fleet rules + derived availability (client-safe)
   products.ts                    # catalogue rules, money, stock and media (client-safe)
+  product-media.ts               # first image per product, one query per page
   roles.ts                       # labels + authorization predicates (client-safe)
   safe-redirect.ts               # post-login `next` validation (client-safe)
   billing/{checkout,sync}.ts     # Checkout payloads + subscription reconciliation
@@ -722,9 +877,9 @@ lib/
   site.ts                        # request origin (validated Host + configured URL)
   subscriptions.ts               # plan catalogue, read from Stripe
   supabase/{client,server,admin,proxy,env,env.server}.ts
-  actions/{auth,billing,company,members,products,settings,support}.ts
+  actions/{account,auth,billing,company,members,products,settings,support}.ts
   actions/assets.ts              # asset writes, with the front-desk status gate
-supabase/migrations/             # schema + RLS (four files)
+supabase/migrations/             # schema + RLS (six files)
 tests/                           # unit, actions, api, integration, db
 ```
 
@@ -823,17 +978,21 @@ runnable:
    same check the page makes, on purpose. Actions never trust the page that
    submitted the form.
 
-4. **Page** — `app/[tenant]/orders/page.tsx`. Copy `settings/page.tsx`: `await
-   connection()`, `getTenantContext(tenant)`, a role gate, then query through
-   `createClient()`. Wrap the authenticated subtree in `<Suspense>` because
-   `getTenantContext` reads cookies. Read `PageProps<"/[tenant]/orders">` — the
-   route types are generated, so the string is checked.
+4. **Page** — `app/[tenant]/orders/page.tsx`. Copy `settings/page.tsx`: call
+   `requireSettingsAccess(tenant)` (its preamble: `await connection()`,
+   `getTenantContext(tenant)`, a role gate), then query through `createClient()`.
+   Wrap the authenticated subtree in `<Suspense>` because `getTenantContext`
+   reads cookies. Read `PageProps<"/[tenant]/orders">` — the route types are
+   generated, so the string is checked.
 
 5. **Navigation and the switch** — add the key to `SECTION_KEYS` in
    `lib/features.ts` with a label, a path and a one-line description, then add an
-   icon to `SECTION_ICONS` in `components/tenant/sidebar-nav.tsx`. The rail, the
-   Settings → Sections checklist, the redirect target and the active state all
-   follow from those two lists. Gate the page with
+   icon to `NAV_ICONS` in `components/tenant/sidebar-nav.tsx`. The rail itself is
+   assembled in `components/tenant/tenant-sidebar.tsx`, which turns the enabled
+   sections into `NavItem`s — that is also where a screen that hangs off a
+   section (rather than being one) gets its entry, as Categories does next to
+   Products. The Settings → Extensions checklist, the redirect target and the
+   active state all follow from those lists. Gate the page with
    `isSectionEnabled(company, "orders")` and `notFound()` when it is off, exactly
    as `app/[tenant]/products/page.tsx` does.
 

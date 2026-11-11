@@ -138,6 +138,22 @@ export function deriveHandle(...parts: string[]): string {
   return slugify(parts.filter(Boolean).join(" "));
 }
 
+/**
+ * The DOM id of the "new product" panel's form.
+ *
+ * The panel keeps its submit button in a footer *outside* the `<form>` — that is
+ * what lets Cancel and Create product sit side by side in the footer — so the
+ * button and the form have to agree on this string. It lives here, away from
+ * both, so neither side can drift without the other noticing.
+ */
+export const NEW_PRODUCT_FORM_ID = "product-new-form";
+
+/**
+ * The same contract for the categories index, whose panel is filled in by
+ * `CategoryFields` and submitted by `FormSheet`'s footer button.
+ */
+export const NEW_CATEGORY_FORM_ID = "category-new-form";
+
 // -----------------------------------------------------------------------------
 // Money
 // -----------------------------------------------------------------------------
@@ -253,6 +269,91 @@ export function familyPriceLabel(family: ProductFamily): string {
   return family.variants.length > 0 && lowest !== family.parent.price_cents
     ? `From ${formatPriceCents(lowest, family.parent.currency)}`
     : formatPriceCents(family.parent.price_cents, family.parent.currency);
+}
+
+// -----------------------------------------------------------------------------
+// Reading order
+// -----------------------------------------------------------------------------
+/**
+ * The orders the catalogue index can be read in.
+ *
+ * `title` is the default and the order the catalogue has always been listed in.
+ * The price orders compare the parent rows only — a family's "from" price is
+ * derived after grouping — so they read as "the shelf, cheapest first" rather
+ * than as a strict sort of every variant.
+ */
+export const PRODUCT_SORT_OPTIONS = [
+  { value: "title", label: "Name A–Z" },
+  { value: "title-desc", label: "Name Z–A" },
+  { value: "newest", label: "Newest first" },
+  { value: "price-asc", label: "Price: low to high" },
+  { value: "price-desc", label: "Price: high to low" },
+] as const;
+
+export type ProductSort = (typeof PRODUCT_SORT_OPTIONS)[number]["value"];
+
+/**
+ * The `?sort=` to use, falling back to `title`.
+ *
+ * Anything unknown — a hand-typed URL, a stale bookmark — reads as the default
+ * rather than as an error, the same way an unknown `?status=` is ignored.
+ */
+export function readProductSort(value: unknown): ProductSort {
+  return (
+    PRODUCT_SORT_OPTIONS.find((option) => option.value === value)?.value ??
+    "title"
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Categories
+// -----------------------------------------------------------------------------
+/**
+ * The orders the categories index can be read in.
+ *
+ * `position` is the shelf order the section has always used — the number the
+ * operator types, then the name to break ties. `busiest` is the odd one out:
+ * category sizes are counted in the page (PostgREST cannot `group by` without
+ * an RPC), so that order is applied once the rows arrive instead of in SQL.
+ */
+export const CATEGORY_SORT_OPTIONS = [
+  { value: "position", label: "Shelf order" },
+  { value: "name", label: "Name A–Z" },
+  { value: "name-desc", label: "Name Z–A" },
+  { value: "busiest", label: "Most products" },
+] as const;
+
+export type CategorySort = (typeof CATEGORY_SORT_OPTIONS)[number]["value"];
+
+/** The `?sort=` to use, falling back to the shelf order. */
+export function readCategorySort(value: unknown): CategorySort {
+  return (
+    CATEGORY_SORT_OPTIONS.find((option) => option.value === value)?.value ??
+    "position"
+  );
+}
+
+/** Characters PostgREST reads as filter syntax, or `ilike` as wildcards. */
+const CATEGORY_SEARCH_STRIP = /[,()%*\\]/g;
+
+/**
+ * The `?q=` to search categories for, or `null` when there is nothing to search.
+ *
+ * The result is spliced into PostgREST's `or()` filter, so the characters that
+ * would end one predicate or start another are dropped rather than escaped: a
+ * search box is a substring match, not a pattern language. Whitespace is
+ * collapsed, and a term made only of those characters reads as "no search"
+ * rather than as "match everything".
+ */
+export function categorySearchTerm(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+
+  const term = value
+    .replace(CATEGORY_SEARCH_STRIP, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return term.length > 0 ? term : null;
 }
 
 // -----------------------------------------------------------------------------

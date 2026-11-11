@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { formDataOf } from "../helpers/fixtures";
-import { captureRedirect, redirectParams } from "../helpers/redirect";
+import { captureRedirect, redirectParams, redirectPath } from "../helpers/redirect";
 import { tenantSetup } from "../helpers/tenant";
 
 const serverMock = vi.hoisted(() => ({ createClient: vi.fn() }));
@@ -67,28 +67,141 @@ describe("updateCompany", () => {
     expect(redirectParams(url).get("error")).toBe("Enter a company name.");
   });
 
-  it("updates only the name, never the slug", async () => {
+  it("refuses a currency this build does not offer", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateCompany(
+        formDataOf({ slug: "acme", name: "Acme Wellness", currency: "jpy" }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "Choose a currency from the list.",
+    );
+    expect(mock.methodsFor("companies")).not.toContain("update");
+  });
+
+  it("refuses a badge longer than two characters", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateCompany(
+        formDataOf({
+          slug: "acme",
+          name: "Acme Wellness",
+          currency: "usd",
+          badge: "ABC",
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "Keep the badge to 2 characters.",
+    );
+    expect(mock.methodsFor("companies")).not.toContain("update");
+  });
+
+  it("refuses a badge with a space in it", async () => {
+    tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateCompany(
+        formDataOf({
+          slug: "acme",
+          name: "Acme Wellness",
+          currency: "usd",
+          badge: "A B",
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "Use one or two characters, or a single emoji.",
+    );
+  });
+
+  it("updates name, default currency and badge, never the slug", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    const url = await captureRedirect(() =>
+      updateCompany(
+        formDataOf({
+          slug: "acme",
+          name: "Acme Wellness",
+          currency: "eur",
+          badge: " AW ",
+          next_slug: "renamed",
+        }),
+      ),
+    );
+
+    // Company is the index tab, so `/settings` keeps working for every link
+    // written before the settings screen was split.
+    expect(redirectPath(url)).toBe("/acme/settings");
+    // The badge arrives trimmed, and the slug is not in the payload at all — it
+    // is the URL, and moving it would break every bookmark and invitation link.
+    expect(mock.argFor("companies", "update")).toEqual({
+      name: "Acme Wellness",
+      currency: "eur",
+      badge: "AW",
+    });
+  });
+
+  it("stores an empty badge as null so the initials are drawn", async () => {
     const mock = tenantSetup(serverMock.createClient);
 
     await captureRedirect(() =>
       updateCompany(
-        formDataOf({ slug: "acme", name: "Acme Wellness", next_slug: "renamed" }),
+        formDataOf({
+          slug: "acme",
+          name: "Acme Wellness",
+          currency: "usd",
+          badge: "   ",
+        }),
       ),
     );
 
     expect(mock.argFor("companies", "update")).toEqual({
       name: "Acme Wellness",
+      currency: "usd",
+      badge: null,
     });
   });
 
-  it("revalidates the whole tenant layout so the sidebar updates", async () => {
+  it("keeps an emoji badge as one character", async () => {
+    const mock = tenantSetup(serverMock.createClient);
+
+    await captureRedirect(() =>
+      updateCompany(
+        formDataOf({
+          slug: "acme",
+          name: "Acme Wellness",
+          currency: "usd",
+          badge: "🚀",
+        }),
+      ),
+    );
+
+    expect(mock.argFor("companies", "update")).toEqual({
+      name: "Acme Wellness",
+      currency: "usd",
+      badge: "🚀",
+    });
+  });
+
+  it("revalidates the root layout, because the workspace chooser draws the mark", async () => {
     tenantSetup(serverMock.createClient);
 
     await captureRedirect(() =>
-      updateCompany(formDataOf({ slug: "acme", name: "Acme Wellness" })),
+      updateCompany(
+        formDataOf({ slug: "acme", name: "Acme Wellness", currency: "usd" }),
+      ),
     );
 
-    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme", "layout");
+    // `/workspaces` lists every workspace, so the tenant-scoped path would leave
+    // a renamed or re-badged company stale on the chooser.
+    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });
 
@@ -115,7 +228,7 @@ describe("updateEnabledSections", () => {
     );
   });
 
-  it("does not let a manager switch a section on", async () => {
+  it("does not let a manager switch an extension on", async () => {
     tenantSetup(serverMock.createClient, {}, "manager");
 
     const url = await captureRedirect(() =>
@@ -147,8 +260,9 @@ describe("updateEnabledSections", () => {
     const url = await captureRedirect(() => updateEnabledSections(sectionsForm([])));
 
     expect(mock.argFor("companies", "update")).toEqual({ enabled_sections: [] });
+    expect(redirectPath(url)).toBe("/acme/settings/extensions");
     expect(redirectParams(url).get("ok")).toBe(
-      "Sections updated. All optional sections are off.",
+      "Extensions updated. All optional extensions are off.",
     );
   });
 
@@ -159,7 +273,7 @@ describe("updateEnabledSections", () => {
       updateEnabledSections(sectionsForm(["products"])),
     );
 
-    expect(redirectParams(url).get("ok")).toBe("Sections updated: Products.");
+    expect(redirectParams(url).get("ok")).toBe("Extensions updated: Products.");
   });
 
   it("revalidates the tenant layout so the rail changes", async () => {
