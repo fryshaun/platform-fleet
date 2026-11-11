@@ -5,7 +5,31 @@ const serverMock = vi.hoisted(() => ({ createClient: vi.fn() }));
 const recoveryMock = vi.hoisted(() => ({ openRecoveryWindow: vi.fn() }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createClient: serverMock.createClient,
+  /**
+   * Every client the callback sees also has the MFA surface.
+   *
+   * The tests below describe only the methods they are about, and the callback
+   * now ends by asking for the assurance level (see `redirectAfterSignIn`).
+   * Reporting `aal1 → aal1` says "this account has no second factor", so the
+   * handler lands on `next` exactly as it did before two-factor existed; the
+   * tests that care about the challenge live in `tests/unit/mfa-gate.test.ts`.
+   */
+  createClient: async () => {
+    const client = await serverMock.createClient();
+
+    return {
+      ...client,
+      auth: {
+        mfa: {
+          getAuthenticatorAssuranceLevel: async () => ({
+            data: { currentLevel: "aal1", nextLevel: "aal1" },
+            error: null,
+          }),
+        },
+        ...client.auth,
+      },
+    };
+  },
 }));
 
 vi.mock("@/lib/recovery", () => ({
@@ -174,6 +198,60 @@ describe("GET /auth/callback", () => {
     const response = await GET(callback("?code=abc"));
 
     expect(locationOf(response)).toBe("https://platform.example.com/workspaces");
+  });
+
+  describe("second factor", () => {
+    /** A client whose account has an authenticator it has not used yet. */
+    function clientNeedingChallenge() {
+      serverMock.createClient.mockResolvedValue({
+        auth: {
+          exchangeCodeForSession: vi.fn(async () => ({ data: {}, error: null })),
+          verifyOtp: vi.fn(async () => ({ data: {}, error: null })),
+          mfa: {
+            getAuthenticatorAssuranceLevel: vi.fn(async () => ({
+              data: { currentLevel: "aal1", nextLevel: "aal2" },
+              error: null,
+            })),
+          },
+        },
+        rpc: vi.fn(async () => ({ data: 0, error: null })),
+      });
+    }
+
+    it("sends a sign-in with an authenticator through /mfa", async () => {
+      clientNeedingChallenge();
+
+      const response = await GET(callback("?code=abc&next=%2Facme%2Fdashboard"));
+
+      // Landing on the page directly would show an app the session has not
+      // finished signing in to.
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/mfa?next=%2Facme%2Fdashboard",
+      );
+    });
+
+    it("asks for the code after an emailed link too", async () => {
+      clientNeedingChallenge();
+
+      const response = await GET(callback("?token_hash=abc&type=magiclink"));
+
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/mfa?next=%2Fworkspaces",
+      );
+    });
+
+    it("lets a recovery link through: the factor is what was lost", async () => {
+      clientNeedingChallenge();
+      recoveryMock.openRecoveryWindow.mockResolvedValue(undefined);
+
+      const response = await GET(
+        callback("?token_hash=abc&type=recovery&next=%2Freset-password"),
+      );
+
+      expect(locationOf(response)).toBe(
+        "https://platform.example.com/reset-password",
+      );
+    });
   });
 
   describe("open-redirect protection", () => {

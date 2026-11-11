@@ -113,6 +113,12 @@ pnpm dev
    `<company-id>/<uuid>.<ext>` and allowed to owners and admins only; every member
    can read the mark, and no section check is involved — identity is not optional.
 
+   `20260101000900_two_factor.sql` adds the workspace policy and the answer the
+   client libraries cannot give: `companies.require_mfa` (off by default) and
+   `public.has_password()`, a `security definer` function that reports whether
+   `auth.users.encrypted_password` is set. It needs the recovery-codes toggle in
+   the dashboard too — see **Two-factor authentication** below.
+
    A feature module adds its own numbered migration; it never edits the ones
    before it.
 
@@ -393,10 +399,17 @@ business, and a page would mean losing your place on whatever you were doing.
   down (`revalidatePath("/", "layout")`).
 - **Password** — `changePassword` asks for the current password and re-proves it
   with `signInWithPassword` before calling `auth.updateUser`. Without that step a
-  borrowed browser could change the password that protects the account. An
-  account that signs in with Google has `app_metadata.providers = ["google"]`,
-  so `SessionUser.hasPassword` is false and the form offers "set a password"
-  instead — there is nothing to confirm.
+  borrowed browser could change the password that protects the account.
+  `SessionUser.hasPassword` decides whether there is anything to confirm, and it
+  comes from `public.has_password()` — the only truthful source. The provider
+  list is misleading exactly where it matters: an invited account has
+  `app_metadata.providers = ["email"]` from the moment the invitation is sent,
+  but GoTrue stores no password until the person chooses one, so
+  `encrypted_password` is null and asking for "your current password" was a dead
+  end. Google-only accounts answer false for the same reason and get the same
+  "set a password" form. When the RPC itself fails (a deployment without
+  migration 09) the action falls back to the provider list rather than refusing
+  the change.
 
 Two limits are worth knowing before you change this:
 
@@ -407,6 +420,96 @@ Two limits are worth knowing before you change this:
   `updateUser` without a nonce from `reauthenticate()`. Leave it off, or extend
   `changePassword` to fetch and use one. Changing the email address, and the
   forgot-password flow, deliberately stay in Supabase's own email templates.
+
+## Two-factor authentication
+
+A second factor is an authenticator app's six-digit code on top of the password.
+The implementation is Supabase's own MFA — no factor table of ours, no secrets in
+the database — plus two screens and a policy column.
+
+**Where it lives.** `/mfa` asks for the code; `/mfa/setup` creates the factor. Both
+are top-level routes, not tenant ones: a factor belongs to the *account*, and both
+pages must render for a session at `aal1`, which is exactly the session every
+tenant layout turns away. The account sheet (avatar → **User settings**) is where
+a person turns it on by choice, prints backup codes and removes a factor.
+
+**The policy.** `companies.require_mfa` is off by default. An owner or admin flips
+it under **Settings → Security**; nothing else about the workspace changes.
+Switching it on does not sign anyone out: the next request from a member without
+an authenticator is answered with `/mfa/setup`, which they can complete. Switching
+it off is how a member who lost their phone gets back in.
+
+**The gate.** `lib/mfa.ts` sorts a request into three stages from two facts — does
+the account have a confirmed `totp` factor, and what is the session's `aal`:
+
+| stage | when | result |
+| --- | --- | --- |
+| `ok` | session already `aal2`, or no factor and nothing requires one | carry on |
+| `challenge` | a factor exists and this session has not proved it | `/mfa?next=…` |
+| `enroll` | the workspace requires a factor and the account has none | `/mfa/setup?next=…` |
+
+That decision is made in the data access layer — `getTenantContext()`,
+`getActionContext()` and `getSessionContext()` in `lib/auth.ts` and
+`lib/actions/support.ts` — not in `proxy.ts`, which has the cookie and the URL but
+not the company row. Every tenant screen resolves its context through
+`getTenantContext`, so a new screen cannot forget it, and Server Actions
+re-authorize themselves through `getActionContext`. The redirect never answers
+`401`/`403`: a page that explains itself beats an error somebody cannot act on.
+
+Signing in also goes through the factor: `signInWithEmail`, `verifyEmailOtp` and
+`/auth/callback` all end at `signInLandingPath()`, so a password or a magic link
+lands on `/mfa` when the account has an authenticator. A **recovery** link is the
+one exception — that person is there because they lost their way in.
+
+**Backup codes** are Supabase's, behind `auth.experimental.recoveryCodes: true` in
+`lib/supabase/client.ts` and `lib/supabase/server.ts` (the proxy never calls them,
+so it does not set the flag). They are generated once and shown once: GoTrue keeps
+hashes, so a lost list means regenerating. Each code works once, case and dashes
+are ignored, and codes can never be the only factor — `mfa_recovery_codes_sole_factor`
+is why the card only appears after an authenticator is confirmed, and why removing
+the last authenticator removes the codes with it.
+
+### What the Supabase dashboard needs
+
+1. **Authentication → Multi-Factor**: TOTP enabled, and **recovery codes**
+   enabled. Without the second, every code action answers
+   `mfa_recovery_codes_enroll_not_enabled` and the app says so in words instead of
+   showing a stack trace.
+2. **Authentication → URL Configuration**: the **Site URL** and every redirect
+   origin you use (`http://localhost:3000`, the deployment URL). The same rule as
+   the other email links — an unlisted `redirect_to` is silently replaced by the
+   Site URL.
+3. **SMTP** if the project is in production: invitations, recovery and
+   confirmations all go through it (see **1. Supabase project** above).
+4. Nothing else. There is no `config.toml` in this repository: the project is
+   hosted, and these are project settings rather than files.
+
+### Editing it
+
+- One authenticator per account. `startTotpEnrollment` refuses when a confirmed
+  one exists, and clears any **unverified** factor first: the friendly name is a
+  constant (`TOTP_FACTOR_NAME`), so a half-finished attempt would otherwise block
+  the next one with a name conflict.
+- Verifying or removing a factor signs out **every other session** and promotes
+  the current one to `aal2`; the copy in the sheet says so.
+- GoTrue's error codes are mapped to sentences once, in
+  `lib/actions/mfa.ts` (`insufficient_aal`, `mfa_verified_factor_exists`,
+  `mfa_recovery_codes_enroll_not_enabled`, `mfa_recovery_codes_locked`, …). A
+  message that is not in the map is shown as it came, like the account actions.
+- Anything that changes factors calls `revalidatePath("/", "layout")`:
+  `getCurrentUser()` caches the factor list, and the rail, the sheet and the gate
+  all read it from there. The **assurance level** is deliberately not cached —
+  it changes with every token refresh and is read live by `enforceMfa`.
+
+### Lost device
+
+In order: a backup code (`/mfa?mode=backup`), then the recovery email at
+`/reset-password` — which is exempt from the gate precisely because the factor is
+what went missing — and finally an owner or admin turning the workspace
+requirement off so the person can sign in and add a new authenticator. Supabase's
+dashboard can also remove a factor from a user, which is the last resort for a
+sole owner with neither phone nor codes. Lost-device policy is a written decision
+on purpose: the app cannot know which of those a given workspace wants.
 
 ## Workspace identity
 
@@ -754,6 +857,15 @@ breaks every other project on the same port.
   RLS. Writes are. If a deployment needs gated media, make the bucket private and
   hand the storefront a signed read URL from the server — `product_media` already
   stores everything that requires.
+- **Two-factor is a product rule, not an authorization boundary.** The gate reads
+  the `aal` claim out of the JWT in the cookie, and that claim is decoded locally
+  rather than verified. A session that bypasses `/mfa` by hand — a forged cookie,
+  a scripted request — is still a session, and RLS is what it then runs into:
+  every policy is written against `auth.uid()` and membership, never against the
+  assurance level. The alternative, an `aal` check inside every policy, would lock
+  a member out of reading even the workspace name they need in order to be told
+  they must enrol. What the gate buys is that the ordinary path asks for the
+  second factor, every time, before the app is usable.
 - **`getOrigin()` validates, it does not allowlist.** The `Host` and
   `X-Forwarded-Host` headers are restricted to `hostname[:port]` characters and
   `X-Forwarded-Proto` to `http`/`https`, so a malformed value can no longer reach
@@ -850,6 +962,8 @@ app/
   reset-password/                # new password after a recovery link
   onboarding/                    # create company + start Stripe Checkout
   workspaces/                    # workspace picker + pending invitations
+  mfa/                           # second factor: the code, or a backup code
+  mfa/setup/                     # create the factor (forced by policy, or by choice)
   auth/callback/route.ts         # OAuth code exchange + email token verification
   api/stripe/webhook/route.ts    # subscription sync
   [tenant]/
@@ -865,13 +979,18 @@ app/
     fields.ts                    # shared class strings for native form controls
     settings/                    # gear: company details (the index tab)
     settings/extensions/         # which optional parts of the app are switched on
+    settings/security/           # the workspace's two-factor requirement
     settings/team/               # invitations and roles
     settings/billing/            # plan, portal, invoices
 components/
   tenant/{sidebar-nav,tenant-sidebar,user-menu,page-header}.tsx
   tenant/tab-nav.tsx             # the settings tab strip: links, not local state
   tenant/settings-link.tsx       # the gear, drawn for owner and admin only
-  tenant/user-settings-sheet.tsx # photo, name and password, from the avatar menu
+  tenant/user-settings-sheet.tsx # photo, name, password and two-factor, from the avatar menu
+  tenant/two-factor-section.tsx  # the authenticator and backup-code cards in that sheet
+  mfa/totp-enrollment.tsx        # QR, setup key and the code that proves it works
+  mfa/totp-challenge.tsx         # the six-digit form on /mfa
+  mfa/recovery-code-challenge.tsx # …and the backup-code one
   tenant/avatar-uploader.tsx     # signed upload straight to the avatars bucket
   tenant/company-mark.tsx        # logo → badge → initials, in the rail and the chooser
   tenant/company-logo-uploader.tsx # signed upload to the company-logos bucket
@@ -879,6 +998,9 @@ components/
 lib/
   auth.ts                        # session + tenancy data access layer
   account.ts                     # name, password and avatar rules (client-safe)
+  mfa.ts                         # two-factor stages, codes and display (client-safe)
+  mfa-server.ts                  # the gate: assurance level, redirects, landing path
+  password.ts                    # has_password(), with the provider list as fallback
   company.ts                     # badge, mark and logo rules (client-safe)
   uploads.ts                     # image types, path checks, public URL parsing
   settings.ts                    # settings tabs: labels and paths (client-safe)
@@ -894,9 +1016,9 @@ lib/
   site.ts                        # request origin (validated Host + configured URL)
   subscriptions.ts               # plan catalogue, read from Stripe
   supabase/{client,server,admin,proxy,env,env.server}.ts
-  actions/{account,auth,billing,company,members,products,settings,support}.ts
+  actions/{account,auth,billing,company,members,mfa,products,settings,support}.ts
   actions/assets.ts              # asset writes, with the front-desk status gate
-supabase/migrations/             # schema + RLS (six files)
+supabase/migrations/             # schema + RLS (seven files)
 tests/                           # unit, actions, api, integration, db
 ```
 

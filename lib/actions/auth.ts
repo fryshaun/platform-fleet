@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { MIN_PASSWORD_LENGTH, OTP_LENGTH } from "@/lib/auth-policy";
+import { redirectAfterSignIn } from "@/lib/mfa-server";
 import { safeNextPath } from "@/lib/safe-redirect";
 import { getOrigin } from "@/lib/site";
 import { createClient } from "@/lib/supabase/server";
@@ -81,7 +82,9 @@ export async function signInWithEmail(
     return { error: signInMessage(error.message), notice: null };
   }
 
-  redirect(next);
+  // A password is the first factor only. An account with an authenticator lands
+  // on `/mfa` first, then comes back to `next`.
+  return redirectAfterSignIn(supabase, next);
 }
 
 /**
@@ -216,7 +219,7 @@ export async function verifyEmailOtp(
     return { error: verifyCodeMessage(error.message), notice: null };
   }
 
-  redirect(next);
+  return redirectAfterSignIn(supabase, next);
 }
 
 /**

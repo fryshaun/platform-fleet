@@ -94,6 +94,7 @@ export async function TenantSidebar({ slug }: { slug: string }) {
           email={user.email}
           avatarUrl={user.avatarUrl}
           hasPassword={user.hasPassword}
+          mfa={user.mfa}
           workspaceName={company.name}
           roleLabel={roleLabel(role)}
         />

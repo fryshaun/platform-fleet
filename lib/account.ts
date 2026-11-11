@@ -80,6 +80,14 @@ export function passwordChangeProblem({
  * by a Google sign-in lists only `google`, and asking it for a "current
  * password" would be a dead end — so the form offers to set one instead.
  *
+ * **This is a guess, not the truth.** An invited user has `providers: ["email"]`
+ * from the moment the invitation is sent, but GoTrue stores no password for them
+ * until they choose one, so this answers `true` for exactly the accounts that
+ * cannot answer "your current password". The truth lives in
+ * `auth.users.encrypted_password`, which only `public.has_password()` can read —
+ * `readHasPassword` in `lib/password.ts` asks it and uses this only as a
+ * fallback.
+ *
  * A missing list answers `true`: asking for a confirmation that turns out to be
  * unnecessary is a smaller mistake than letting a session change a password
  * without one.
@@ -90,6 +98,18 @@ export function hasPasswordProvider(providers: unknown): boolean {
   }
   return providers.length === 0 || providers.includes("email");
 }
+
+/**
+ * Reads the `has_password()` answer, falling back to the provider list.
+ *
+ * Pulled out as a pure function so the fallback can be tested without a
+ * database: `data` is whatever the RPC returned, which is `true`, `false`, or
+ * `null`/`undefined` when the call did not happen.
+ */
+export function hasPasswordFromRpc(data: unknown, providers: unknown): boolean {
+  return typeof data === "boolean" ? data : hasPasswordProvider(providers);
+}
+
 
 /**
  * The one or two letters an avatar shows when there is no photo.

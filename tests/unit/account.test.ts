@@ -10,6 +10,7 @@ import {
   avatarTypeFor,
   fullNameProblem,
   FULL_NAME_MAX,
+  hasPasswordFromRpc,
   hasPasswordProvider,
   initials,
   isOwnAvatarPath,
@@ -131,6 +132,28 @@ describe("hasPasswordProvider", () => {
     expect(hasPasswordProvider(undefined)).toBe(true);
     expect(hasPasswordProvider([])).toBe(true);
     expect(hasPasswordProvider("email")).toBe(true);
+  });
+
+  it("is only a guess, which is why the RPC wins", () => {
+    // An invited account: `providers` says email before GoTrue stores a password.
+    // `hasPasswordFromRpc` below is what the actions actually ask.
+    expect(hasPasswordProvider(["email"])).toBe(true);
+    expect(hasPasswordFromRpc(false, ["email"])).toBe(false);
+  });
+});
+
+describe("hasPasswordFromRpc", () => {
+  it("trusts the database answer over the provider list", () => {
+    expect(hasPasswordFromRpc(false, ["email"])).toBe(false);
+    expect(hasPasswordFromRpc(true, ["google"])).toBe(true);
+  });
+
+  it("falls back to the provider list when there is no answer", () => {
+    // `rpc()` resolves `{ data: null }` when the call failed, which is the state
+    // a deployment without migration 09 is in.
+    expect(hasPasswordFromRpc(null, ["google"])).toBe(false);
+    expect(hasPasswordFromRpc(undefined, ["email"])).toBe(true);
+    expect(hasPasswordFromRpc("true", ["google"])).toBe(false);
   });
 });
 

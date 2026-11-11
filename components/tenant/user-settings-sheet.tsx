@@ -21,6 +21,9 @@ import {
   type AccountFormState,
 } from "@/lib/actions/account";
 import { MIN_PASSWORD_LENGTH } from "@/lib/auth-policy";
+import type { MfaFactor } from "@/lib/mfa";
+
+import { TwoFactorSection } from "./two-factor-section";
 
 const EMPTY_STATE: AccountFormState = { error: null, notice: null };
 
@@ -46,14 +49,23 @@ export function UserSettingsSheet({
   fullName,
   avatarUrl,
   hasPassword,
+  mfa,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   email: string;
   fullName: string | null;
   avatarUrl: string | null;
-  /** False for an account that only signs in through an OAuth provider. */
+  /**
+   * Whether the account has a password to confirm before changing it.
+   *
+   * False for an OAuth-only account *and* for an invited one that has never set
+   * a password — which is why it comes from `public.has_password()` rather than
+   * the provider list.
+   */
   hasPassword: boolean;
+  /** The authenticators and backup codes on the account. */
+  mfa: { enrolled: boolean; factors: MfaFactor[] };
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -61,8 +73,8 @@ export function UserSettingsSheet({
         <SheetHeader className="border-b pr-12">
           <SheetTitle>Your account</SheetTitle>
           <SheetDescription>
-            Your photo, your name and your password. They follow you into every
-            workspace.
+            Your photo, your name, your password and how you prove it is you.
+            They follow you into every workspace.
           </SheetDescription>
         </SheetHeader>
 
@@ -77,6 +89,7 @@ export function UserSettingsSheet({
 
           <ProfileForm fullName={fullName} email={email} />
           <PasswordForm hasPassword={hasPassword} />
+          <TwoFactorSection mfa={mfa} />
         </div>
       </SheetContent>
     </Sheet>
@@ -157,7 +170,7 @@ function PasswordForm({ hasPassword }: { hasPassword: boolean }) {
         <p className="text-muted-foreground text-xs">
           {hasPassword
             ? "You are asked for the current one first, so a borrowed browser cannot lock you out."
-            : "You sign in with Google. Setting a password also lets you sign in with your email address."}
+            : "You do not have a password yet — you signed in with a link. Choose one and you can sign in with your email address from now on."}
         </p>
       </div>
 

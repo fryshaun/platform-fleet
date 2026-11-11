@@ -110,3 +110,42 @@ export async function updateEnabledSections(formData: FormData) {
             .join(", ")}.`,
   });
 }
+
+/**
+ * Turns the workspace's second-factor requirement on or off.
+ *
+ * The column is written through `companies`, whose update policy is already
+ * owner/admin only, so this needs no new grant and no policy of its own.
+ *
+ * Switching it **on** does not sign anybody out or lock them out: the next
+ * request from a member without an authenticator is answered with
+ * `/mfa/setup`, which is a page they can complete. Switching it **off** is the
+ * way back in for somebody who has lost their phone, which is why the settings
+ * screen says so.
+ */
+export async function updateTwoFactorPolicy(formData: FormData) {
+  const slug = readField(formData, "slug");
+  const context = await getActionContext(slug);
+  requireAdministrator(context, slug);
+
+  // A checked box posts "on"; an unchecked one posts nothing at all.
+  const requireMfa = readField(formData, "require_mfa") === "on";
+
+  const { error } = await context.supabase
+    .from("companies")
+    .update({ require_mfa: requireMfa })
+    .eq("id", context.company.id);
+
+  if (error) {
+    redirectWith(slug, settingsSegment("security"), { error: error.message });
+  }
+
+  // Every screen decides whether to ask for a second factor from this column,
+  // and that decision is cached with the tenant context.
+  revalidatePath("/", "layout");
+  redirectWith(slug, settingsSegment("security"), {
+    ok: requireMfa
+      ? "Two-factor authentication is now required. Everyone in this workspace will be asked to add an authenticator."
+      : "Two-factor authentication is no longer required.",
+  });
+}

@@ -61,6 +61,17 @@ type SetupOptions = {
   signInError?: { message: string } | null;
   updateUserError?: { message: string } | null;
   storage?: Record<string, StorageBucketOverrides>;
+  /** `user.factors`, as `getUser()` returns them. */
+  factors?: { id: string; factor_type: string; status: string }[];
+  /** Overrides merged into the `auth.mfa` stub, one level deep. */
+  mfa?: Record<string, unknown>;
+  /**
+   * Answers for `supabase.rpc()`, keyed by function name.
+   *
+   * `has_password()` is the only one these actions call; leaving it out makes the
+   * mock answer `{ data: null }`, which is the "call failed" path.
+   */
+  rpc?: Record<string, () => { data?: unknown; error?: { message: string } | null }>;
 };
 
 /**
@@ -89,6 +100,7 @@ function setup(options: SetupOptions = {}) {
           data: {
             user: {
               ...session.data.user,
+              factors: options.factors ?? [],
               app_metadata:
                 options.providers === undefined
                   ? {}
@@ -100,6 +112,7 @@ function setup(options: SetupOptions = {}) {
       }),
       signInWithPassword,
       updateUser,
+      mfa: options.mfa,
     },
     tables: {
       profiles: () => ({
@@ -111,6 +124,7 @@ function setup(options: SetupOptions = {}) {
       }),
     },
     storage: options.storage,
+    rpc: options.rpc,
   });
 
   serverMock.createClient.mockResolvedValue(mock.client);
@@ -279,6 +293,65 @@ describe("changePassword", () => {
     expect(state.error).toBeNull();
   });
 
+  it("sets one for an invited account, whatever the provider list says", async () => {
+    // The bug this covers: an invited user has `providers: ["email"]` from the
+    // moment the invitation is sent, but GoTrue stores no password until they
+    // choose one. Asking them for "your current password" was a dead end.
+    const { mock, signInWithPassword, updateUser } = setup({
+      providers: ["email"],
+      rpc: { has_password: () => ({ data: false, error: null }) },
+    });
+
+    const state = await changePassword(
+      EMPTY,
+      formDataOf({ password: "new-password", confirmation: "new-password" }),
+    );
+
+    expect(mock.rpcCalls.map((call) => call.method)).toContain("has_password");
+    expect(signInWithPassword).not.toHaveBeenCalled();
+    expect(updateUser).toHaveBeenCalledWith({ password: "new-password" });
+    expect(state.error).toBeNull();
+  });
+
+  it("still proves the current password when has_password() says there is one", async () => {
+    // The provider list and the truth usually agree; the RPC is what makes the
+    // disagreement visible.
+    const { mock, signInWithPassword } = setup({
+      providers: ["email"],
+      rpc: { has_password: () => ({ data: true, error: null }) },
+    });
+
+    await changePassword(EMPTY, formDataOf(CHANGE));
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: "ada@example.com",
+      password: "old-password",
+    });
+    expect(mock.rpcCalls).toHaveLength(1);
+  });
+
+  it("falls back to the provider list when has_password() fails", async () => {
+    // A missing migration must not stop people changing their password.
+    const { signInWithPassword, updateUser } = setup({
+      providers: ["google"],
+      rpc: {
+        has_password: () => ({
+          data: null,
+          error: { message: "function public.has_password() does not exist" },
+        }),
+      },
+    });
+
+    const state = await changePassword(
+      EMPTY,
+      formDataOf({ password: "new-password", confirmation: "new-password" }),
+    );
+
+    expect(signInWithPassword).not.toHaveBeenCalled();
+    expect(updateUser).toHaveBeenCalledWith({ password: "new-password" });
+    expect(state.error).toBeNull();
+  });
+
   it("explains a password GoTrue refuses as unchanged", async () => {
     setup({
       updateUserError: {
@@ -289,6 +362,28 @@ describe("changePassword", () => {
     const state = await changePassword(EMPTY, formDataOf(CHANGE));
 
     expect(state.error).toBe("Choose a password you have not used here before.");
+  });
+
+  it("challenges the second factor before a password change", async () => {
+    // The sheet only renders for a session that has proved its factor, but the
+    // action re-checks rather than trusting the page it was rendered on.
+    const { updateUser } = setup({
+      providers: ["email"],
+      factors: [{ id: "factor-1", factor_type: "totp", status: "verified" }],
+      mfa: {
+        getAuthenticatorAssuranceLevel: vi.fn(async () => ({
+          data: { currentLevel: "aal1", nextLevel: "aal2" },
+          error: null,
+        })),
+      },
+    });
+
+    const url = await captureRedirect(() =>
+      changePassword(EMPTY, formDataOf(CHANGE)),
+    );
+
+    expect(url).toBe("/mfa?next=%2Fworkspaces");
+    expect(updateUser).not.toHaveBeenCalled();
   });
 });
 
@@ -321,6 +416,29 @@ describe("setRecoveredPassword", () => {
     // One link, one password: the same page must not be usable again.
     expect(recoveryMock.closeRecoveryWindow).toHaveBeenCalled();
     expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("still works when the account has an authenticator it cannot use", async () => {
+    // A factor is exactly what this person lost. Challenging them here would be
+    // a loop with no way out — the recovery cookie is the proof instead.
+    const { updateUser } = setup({
+      providers: ["email"],
+      rpc: { has_password: () => ({ data: true, error: null }) },
+      factors: [{ id: "factor-1", factor_type: "totp", status: "verified" }],
+      mfa: {
+        getAuthenticatorAssuranceLevel: vi.fn(async () => ({
+          data: { currentLevel: "aal1", nextLevel: "aal2" },
+          error: null,
+        })),
+      },
+    });
+
+    const url = await captureRedirect(() =>
+      setRecoveredPassword(EMPTY, formDataOf(RESET)),
+    );
+
+    expect(updateUser).toHaveBeenCalledWith({ password: "new-password" });
+    expect(url).toBe("/workspaces");
   });
 
   it("refuses a browser that did not open a recovery link", async () => {

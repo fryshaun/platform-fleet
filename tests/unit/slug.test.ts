@@ -220,6 +220,7 @@ describe("RESERVED_SEGMENTS", () => {
       "reset-password",
       "onboarding",
       "workspaces",
+      "mfa",
     ]) {
       expect(RESERVED_SEGMENTS.has(segment), segment).toBe(true);
     }

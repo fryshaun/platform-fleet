@@ -14,7 +14,12 @@
  * the same labels.
  */
 
-export type SettingsTab = "company" | "extensions" | "team" | "billing";
+export type SettingsTab =
+  | "company"
+  | "extensions"
+  | "security"
+  | "team"
+  | "billing";
 
 export type SettingsTabDefinition = {
   tab: SettingsTab;
@@ -27,6 +32,7 @@ export type SettingsTabDefinition = {
 export const SETTINGS_TABS: readonly SettingsTabDefinition[] = [
   { tab: "company", label: "Company", segment: "" },
   { tab: "extensions", label: "Extensions", segment: "extensions" },
+  { tab: "security", label: "Security", segment: "security" },
   { tab: "team", label: "Team", segment: "team" },
   { tab: "billing", label: "Billing", segment: "billing" },
 ];

@@ -14,6 +14,7 @@ export const RESERVED_SEGMENTS = new Set([
   "workspaces",
   "dashboard",
   "settings",
+  "mfa",
   "admin",
   "www",
   "app",

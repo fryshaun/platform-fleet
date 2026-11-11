@@ -159,7 +159,11 @@ export async function setRecoveredPassword(
     );
   }
 
-  const { supabase } = await getSessionContext();
+  const { supabase } = await getSessionContext({
+    // The factor is what this person lost. Asking for it here would send them to
+    // a page they cannot complete; the recovery cookie is the proof instead.
+    challengeSecondFactor: false,
+  });
 
   const password = readSecret(formData, "password");
   const confirmation = readSecret(formData, "confirmation");

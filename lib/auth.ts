@@ -3,7 +3,9 @@ import "server-only";
 import { cacheLife } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 
-import { hasPasswordProvider } from "@/lib/account";
+import { hasVerifiedTotp, toMfaFactors, type MfaFactor } from "@/lib/mfa";
+import { enforceMfa } from "@/lib/mfa-server";
+import { readHasPassword } from "@/lib/password";
 import { createClient } from "@/lib/supabase/server";
 import type {
   MemberRole,
@@ -17,10 +19,27 @@ export type SessionUser = {
   fullName: string | null;
   avatarUrl: string | null;
   /**
-   * Whether the account has a password to confirm before changing it, or only
-   * an OAuth provider. See `hasPasswordProvider`.
+   * Whether the account has a password to confirm before changing it.
+   *
+   * Answered by `public.has_password()`, which is the only honest source: an
+   * invited account has no password yet, even though its provider list already
+   * says `email`. See `readHasPassword`.
    */
   hasPassword: boolean;
+  /**
+   * The authenticators on the account.
+   *
+   * The factors come from `getUser()` and are safe to cache *in the payload*
+   * because enrolling or removing one is a mutation that revalidates the tree.
+   * The assurance level is deliberately **not** here: it changes per session and
+   * per token refresh, so it is read live by `enforceMfa` instead.
+   */
+  mfa: {
+    /** Whether there is a confirmed authenticator to challenge. */
+    enrolled: boolean;
+    /** Every factor, including unverified ones and the backup-code set. */
+    factors: MfaFactor[];
+  };
 };
 
 export type Company = Tables<"companies">;
@@ -72,12 +91,18 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     .eq("id", user.id)
     .maybeSingle();
 
+  const factors = toMfaFactors(user.factors);
+
   return {
     id: user.id,
     email: user.email ?? "",
     fullName: profile?.full_name ?? null,
     avatarUrl: profile?.avatar_url ?? null,
-    hasPassword: hasPasswordProvider(user.app_metadata?.providers),
+    hasPassword: await readHasPassword(
+      supabase,
+      user.app_metadata?.providers,
+    ),
+    mfa: { enrolled: hasVerifiedTotp(factors), factors },
   };
 }
 
@@ -213,6 +238,16 @@ export async function getTenantContext(slug: string): Promise<TenantContext> {
   if (!membership) {
     notFound();
   }
+
+  // The workspace's own policy decides whether a second factor is mandatory, so
+  // the gate lives here rather than in `proxy.ts`: the proxy has the cookie and
+  // the URL, not the company row. Every tenant screen resolves its context
+  // through this function, so a new screen cannot forget it.
+  await enforceMfa(supabase, {
+    factors: user.mfa.factors,
+    required: company.require_mfa,
+    nextPath: `/${slug}/dashboard`,
+  });
 
   return { company, role: membership.role, user };
 }

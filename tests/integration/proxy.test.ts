@@ -136,6 +136,16 @@ describe("proxy", () => {
       expect(isPassThrough(await proxy(request("/reset-password")))).toBe(true);
     });
 
+    it("bounces the two-factor screens, which need a session to raise", async () => {
+      // `/mfa` is where an aal1 session is sent; an anonymous visitor has no
+      // factor to prove and is sent to sign in first.
+      for (const path of ["/mfa", "/mfa/setup"]) {
+        const response = await proxy(request(path));
+
+        expect(response.headers.get("location"), path).toContain("/login");
+      }
+    });
+
     it("carries rotated auth cookies onto the redirect", async () => {
       // Dropping them here would silently end the session.
       const sessionResponse = NextResponse.next();

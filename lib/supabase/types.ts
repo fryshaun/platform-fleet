@@ -90,6 +90,7 @@ export type Database = {
           currency: string;
           logo_url: string | null;
           badge: string | null;
+          require_mfa: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -105,6 +106,7 @@ export type Database = {
           currency?: string;
           logo_url?: string | null;
           badge?: string | null;
+          require_mfa?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -120,6 +122,7 @@ export type Database = {
           currency?: string;
           logo_url?: string | null;
           badge?: string | null;
+          require_mfa?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -411,6 +414,10 @@ export type Database = {
       };
       has_company_section: {
         Args: { target_company_id: string; section: string };
+        Returns: boolean;
+      };
+      has_password: {
+        Args: { [_ in never]: never };
         Returns: boolean;
       };
       storage_company_id: {
