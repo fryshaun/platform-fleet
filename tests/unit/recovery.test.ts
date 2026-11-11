@@ -45,6 +45,12 @@ describe("openRecoveryWindow", () => {
   });
 
   it("omits `secure` over http, where the browser would drop the cookie", async () => {
+    // Pinned rather than inherited: `vercel-build` runs this suite on a machine
+    // that exports NODE_ENV=production. `tests/setup/deployment-env.ts` pins it
+    // for the run, and stubbing it here keeps the pair of tests honest on their
+    // own — the branch under test is "not production", which http://localhost is.
+    vi.stubEnv("NODE_ENV", "development");
+
     await openRecoveryWindow();
 
     expect(writtenOptions().secure).toBe(false);
