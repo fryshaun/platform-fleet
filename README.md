@@ -39,21 +39,35 @@ pnpm dev
    too if you want the OAuth button to work.
 
    Email links come back through `/auth/callback`, so both providers need that
-   path allow-listed. Under **Authentication → Emails**:
+   path allow-listed. Every template uses the `token_hash` form rather than the
+   default `{{ .ConfirmationURL }}`: the default only works in the browser that
+   requested the link, while the token works on any device. Under
+   **Authentication → Emails**:
 
-   - *Confirm signup* / *Magic Link*: use
-     `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=signup`
-     (`type=magiclink` for the magic-link template) instead of the default
-     `{{ .ConfirmationURL }}`. The `token_hash` form works in any browser, while
-     the implicit-flow default only works in the browser that requested the link.
+   - *Confirm signup*:
+     `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=signup&next=%2Fonboarding`
+   - *Magic Link*: the same form with
+     `&type=magiclink&next=%2Fworkspaces`, and the body must include
+     `{{ .Token }}` — that six-digit code is what the "Code from the email" field
+     verifies when the mail is opened somewhere else.
+   - *Invite user*:
+     `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite&next=%2Fworkspaces`
+     so a teammate can accept the invitation in any browser. That `type=invite`
+     is what makes the callback activate the pending membership.
+   - *Reset password*:
+     `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=recovery&next=%2Freset-password`.
+     `type=recovery` is what marks the browser as having opened a recovery link,
+     which is the only way `/reset-password` will replace a password.
    - Add `{origin}/auth/callback` to **URL Configuration → Redirect URLs**
      (`http://localhost:3000/**` for development). A target that is not listed
      makes GoTrue fall back to the bare Site URL, and the code lands on `/` —
      `proxy.ts` forwards those to `/auth/callback`, so the flow still completes.
-   - *Invite user*: use
-     `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=invite`
-     so a teammate can accept the invitation in any browser. That `type=invite`
-     is what makes the callback activate the pending membership.
+   - Set **Email OTP length** to 6 (`OTP_LENGTH` is hard-coded), keep **Confirm
+     email** on, and leave **Secure password change** off: `changePassword`
+     re-authenticates with the old password rather than a nonce.
+
+   `docs/supabase-email-templates.md` repeats this list, adds the project
+   settings around it, and carries ready-to-paste HTML for each template.
 2. Apply the migrations. Either link the CLI and push:
 
    ```bash
@@ -282,7 +296,9 @@ Tests must pass before anything deploys:
 ## Walkthrough
 
 1. `/signup` → email + password → the confirmation link → `/auth/callback` →
-   `/onboarding`. Google and the magic-link form land on the same callback.
+   `/onboarding`. Google and the magic-link form land on the same callback; a
+   password reset goes through it too and finishes on `/reset-password`, where a
+   new password is set without the old one.
 2. `/onboarding` lists the plans Stripe sells, then names the company, reserves
    `companies.slug`, inserts the caller as `owner`, and redirects to Stripe
    Checkout for the plan they picked.
@@ -831,6 +847,7 @@ app/
   layout.tsx                     # <html>/<body>, fonts, ThemeProvider
   page.tsx                       # marketing
   login/ signup/                 # sign-in / sign-up (password, magic link, Google)
+  reset-password/                # new password after a recovery link
   onboarding/                    # create company + start Stripe Checkout
   workspaces/                    # workspace picker + pending invitations
   auth/callback/route.ts         # OAuth code exchange + email token verification

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { openRecoveryWindow } from "@/lib/recovery";
 import { safeNextPath } from "@/lib/safe-redirect";
 import { createClient } from "@/lib/supabase/server";
 
@@ -48,6 +49,13 @@ export async function GET(request: NextRequest) {
   }
 
   await dropProviderTokens(supabase, data.session);
+
+  // A recovery link is the only proof that `/reset-password` may replace a
+  // password without the old one, so the browser that verified one is marked
+  // here — after verification, never from a query parameter.
+  if (verification.kind === "token_hash" && verification.type === "recovery") {
+    await openRecoveryWindow();
+  }
 
   // Only an invitation link proves consent to join somebody's workspace.
   // Google, magic-link and signup sessions are ordinary sign-ins, and a

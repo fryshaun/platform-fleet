@@ -11,6 +11,10 @@ import {
 
 const serverMock = vi.hoisted(() => ({ createClient: vi.fn() }));
 const cacheMock = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+const recoveryMock = vi.hoisted(() => ({
+  isRecoveryWindowOpen: vi.fn(),
+  closeRecoveryWindow: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {
@@ -31,11 +35,17 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: serverMock.createClient,
 }));
 
+vi.mock("@/lib/recovery", () => ({
+  isRecoveryWindowOpen: recoveryMock.isRecoveryWindowOpen,
+  closeRecoveryWindow: recoveryMock.closeRecoveryWindow,
+}));
+
 const {
   changePassword,
   createAvatarUploadUrl,
   removeAvatar,
   setAvatar,
+  setRecoveredPassword,
   updateProfile,
 } = await import("@/lib/actions/account");
 
@@ -279,6 +289,76 @@ describe("changePassword", () => {
     const state = await changePassword(EMPTY, formDataOf(CHANGE));
 
     expect(state.error).toBe("Choose a password you have not used here before.");
+  });
+});
+
+describe("setRecoveredPassword", () => {
+  const RESET = { password: "new-password", confirmation: "new-password" };
+
+  beforeEach(() => {
+    recoveryMock.isRecoveryWindowOpen.mockResolvedValue(true);
+  });
+
+  it("sets the password without asking for the current one", async () => {
+    const { signInWithPassword, updateUser } = setup();
+
+    const url = await captureRedirect(() =>
+      setRecoveredPassword(EMPTY, formDataOf(RESET)),
+    );
+
+    // The recovery link is the proof; typing the old password is exactly what
+    // somebody who forgot it cannot do.
+    expect(signInWithPassword).not.toHaveBeenCalled();
+    expect(updateUser).toHaveBeenCalledWith({ password: "new-password" });
+    expect(url).toBe("/workspaces");
+  });
+
+  it("spends the window once the password is saved", async () => {
+    setup();
+
+    await captureRedirect(() => setRecoveredPassword(EMPTY, formDataOf(RESET)));
+
+    // One link, one password: the same page must not be usable again.
+    expect(recoveryMock.closeRecoveryWindow).toHaveBeenCalled();
+    expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/", "layout");
+  });
+
+  it("refuses a browser that did not open a recovery link", async () => {
+    recoveryMock.isRecoveryWindowOpen.mockResolvedValue(false);
+    setup();
+
+    const state = await setRecoveredPassword(EMPTY, formDataOf(RESET));
+
+    // Otherwise any signed-in browser could replace the password that
+    // `changePassword` makes people prove they know.
+    expect(state.error).toBe(
+      "Open the reset link from your email to choose a new password.",
+    );
+    expect(serverMock.createClient).not.toHaveBeenCalled();
+  });
+
+  it("still checks the confirmation", async () => {
+    const { updateUser } = setup();
+
+    const state = await setRecoveredPassword(
+      EMPTY,
+      formDataOf({ ...RESET, confirmation: "new-passwerd" }),
+    );
+
+    expect(state.error).toBe("The two new passwords do not match.");
+    expect(updateUser).not.toHaveBeenCalled();
+    expect(recoveryMock.closeRecoveryWindow).not.toHaveBeenCalled();
+  });
+
+  it("reports what GoTrue says about the new password", async () => {
+    setup({
+      updateUserError: { message: "Password should be at least 6 characters" },
+    });
+
+    const state = await setRecoveredPassword(EMPTY, formDataOf(RESET));
+
+    expect(state.error).toBe("Password should be at least 6 characters");
+    expect(recoveryMock.closeRecoveryWindow).not.toHaveBeenCalled();
   });
 });
 

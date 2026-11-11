@@ -217,6 +217,7 @@ describe("RESERVED_SEGMENTS", () => {
       "auth",
       "login",
       "signup",
+      "reset-password",
       "onboarding",
       "workspaces",
     ]) {

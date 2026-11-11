@@ -9,6 +9,7 @@ export const RESERVED_SEGMENTS = new Set([
   "auth",
   "login",
   "signup",
+  "reset-password",
   "onboarding",
   "workspaces",
   "dashboard",

@@ -219,6 +219,49 @@ export async function verifyEmailOtp(
   redirect(next);
 }
 
+/**
+ * Emails a password-recovery link.
+ *
+ * The link goes through `/auth/callback` like every other email, so the token
+ * is verified in whichever browser opens it and the resulting session is what
+ * `/reset-password` changes the password on. No `next` is accepted: the point
+ * of a reset is the new password, not returning to a deep link.
+ *
+ * The notice is worded conditionally because GoTrue answers the same way for an
+ * address with no account — the response must not reveal which addresses exist.
+ */
+export async function requestPasswordReset(
+  _previousState: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const email = readField(formData, "email");
+
+  if (!email) {
+    return {
+      error: "Enter the email address you signed up with.",
+      notice: null,
+    };
+  }
+
+  const origin = await getOrigin();
+  const supabase = await createClient();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    // `type=recovery` in the template decides that the callback marks the
+    // browser; `next` is what that browser then lands on.
+    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
+  });
+
+  if (error) {
+    return { error: sendLinkMessage(error.message), notice: null };
+  }
+
+  return {
+    error: null,
+    notice: `If ${email} has an account, a reset link is on its way. It expires in an hour and works once.`,
+  };
+}
+
 function signInMessage(message: string): string {
   if (/invalid login credentials/i.test(message)) {
     return "Incorrect email or password.";

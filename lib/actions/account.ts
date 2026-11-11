@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import {
   AVATARS_BUCKET,
@@ -21,6 +22,7 @@ import {
   readSecret,
   type ServerSupabase,
 } from "@/lib/actions/support";
+import { closeRecoveryWindow, isRecoveryWindowOpen } from "@/lib/recovery";
 
 /**
  * Server Actions for the signed-in person's own account.
@@ -133,6 +135,57 @@ export async function changePassword(
   }
 
   return success("Password updated. Use it the next time you sign in.");
+}
+
+/**
+ * Sets a new password from a recovery link, without the current one.
+ *
+ * `changePassword` asks for the current password because `updateUser` needs
+ * nothing but a session; somebody who has forgotten theirs cannot answer that,
+ * so the recovery link is the proof instead. `isRecoveryWindowOpen` is what
+ * keeps that from becoming "any signed-in browser may replace the password" —
+ * only the browser that just verified a `type=recovery` token is marked.
+ *
+ * The one account action that redirects: it is a full page, not the sheet, and
+ * there is nothing left to show once the password is saved.
+ */
+export async function setRecoveredPassword(
+  _previousState: AccountFormState,
+  formData: FormData,
+): Promise<AccountFormState> {
+  if (!(await isRecoveryWindowOpen())) {
+    return failure(
+      "Open the reset link from your email to choose a new password.",
+    );
+  }
+
+  const { supabase } = await getSessionContext();
+
+  const password = readSecret(formData, "password");
+  const confirmation = readSecret(formData, "confirmation");
+
+  // `hasPassword: false` skips the two checks that need the old password; the
+  // length and confirmation rules still apply.
+  const problem = passwordChangeProblem({
+    hasPassword: false,
+    currentPassword: "",
+    password,
+    confirmation,
+  });
+  if (problem) {
+    return failure(problem);
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    return failure(passwordErrorMessage(error.message));
+  }
+
+  // The proof is spent: the same tab cannot set another password with it.
+  await closeRecoveryWindow();
+  revalidatePath("/", "layout");
+  redirect("/workspaces");
 }
 
 function passwordErrorMessage(message: string): string {
