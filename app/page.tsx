@@ -3,6 +3,9 @@ import {
   CreditCardIcon,
   LayoutDashboardIcon,
   ShieldCheckIcon,
+  CalendarCheckIcon,
+  ScanQrCodeIcon,
+  WrenchIcon
 } from "lucide-react";
 
 import { BrandBackdrop } from "@/components/brand/brand-backdrop";
@@ -12,19 +15,19 @@ import { Button } from "@/components/ui/button";
 
 const FEATURES = [
   {
-    icon: LayoutDashboardIcon,
-    title: "One workspace per company",
-    body: "Each company gets its own path-based workspace, with its own members and roles.",
+    icon: CalendarCheckIcon,
+    title: "Asset-Based Booking",
+    body: "Assign availability and reservations to specific bikes, sleds, or machines—not just generic categories—so you never double-book a size or setup.",
   },
   {
-    icon: ShieldCheckIcon,
-    title: "Row Level Security",
-    body: "Tenant isolation is enforced in Postgres, so no query can leak another company's data.",
+    icon: ScanQrCodeIcon,
+    title: "QR Scan & Live Status",
+    body: "Tag every frame or chassis to speed up counter check-outs, log condition notes, and track real-time fleet availability.",
   },
   {
-    icon: CreditCardIcon,
-    title: "Billing built in",
-    body: "Checkout, the billing portal and webhook-driven subscription state are already wired up.",
+    icon: WrenchIcon,
+    title: "Service intervals built in",
+    body: "Trigger maintenance alerts by rental days, mileage, or engine hours so suspension rebuilds, inspections and oil changes never get missed.",
   },
 ];
 
@@ -65,26 +68,24 @@ export default function HomePage() {
             >
               {"///"}
             </span>
-            Multi-tenant starter
+            Trackstand
           </p>
           <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            The base every{" "}
+            Rental bookings and{" "}
             <span className="bg-brand-lime text-brand-forest box-decoration-clone px-1 sm:whitespace-nowrap">
-              customer-facing
-            </span>{" "}
-            app needs.
+              service tracking,
+            </span>{" "}<br/>
+            dialed in.
           </h1>
           <p className="text-muted-foreground max-w-xl text-lg leading-relaxed">
-            Sign-in with email or Google, per-workspace membership and roles,
-            row-level tenant isolation and Stripe billing — all wired up. Bring
-            your own product on top.
+            Asset-level scheduling, fast check-outs, and automated service intervals for cycling and powersports fleets. Know what’s booked, what’s out, and what needs a wrench before it hits the trail.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button size="lg" asChild>
-              <Link href="/signup">Create a workspace</Link>
+              <Link href="/signup">Create a fleet workspace</Link>
             </Button>
             <Button size="lg" variant="outline" asChild>
-              <Link href="/login">I already have one</Link>
+              <Link href="/login">Sign in to existing shop</Link>
             </Button>
           </div>
         </section>
@@ -112,7 +113,7 @@ export default function HomePage() {
         <div className="text-muted-foreground mx-auto flex w-full max-w-5xl flex-col gap-3 text-xs sm:flex-row sm:items-center sm:justify-between">
           <BrandLink logoClassName="text-base" />
           <p className="font-mono tracking-[0.14em] uppercase">
-            Fleet operations · Built for bike shops
+            Fleet operations and booking management.
           </p>
         </div>
       </footer>
