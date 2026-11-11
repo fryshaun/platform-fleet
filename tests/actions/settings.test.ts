@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { formDataOf } from "../helpers/fixtures";
-import { captureRedirect, redirectParams } from "../helpers/redirect";
+import { captureRedirect, redirectParams, redirectPath } from "../helpers/redirect";
 import { tenantSetup } from "../helpers/tenant";
 
 const serverMock = vi.hoisted(() => ({ createClient: vi.fn() }));
@@ -70,12 +70,15 @@ describe("updateCompany", () => {
   it("updates only the name, never the slug", async () => {
     const mock = tenantSetup(serverMock.createClient);
 
-    await captureRedirect(() =>
+    const url = await captureRedirect(() =>
       updateCompany(
         formDataOf({ slug: "acme", name: "Acme Wellness", next_slug: "renamed" }),
       ),
     );
 
+    // Company is the index tab, so `/settings` keeps working for every link
+    // written before the settings screen was split.
+    expect(redirectPath(url)).toBe("/acme/settings");
     expect(mock.argFor("companies", "update")).toEqual({
       name: "Acme Wellness",
     });
@@ -115,7 +118,7 @@ describe("updateEnabledSections", () => {
     );
   });
 
-  it("does not let a manager switch a section on", async () => {
+  it("does not let a manager switch an extension on", async () => {
     tenantSetup(serverMock.createClient, {}, "manager");
 
     const url = await captureRedirect(() =>
@@ -147,8 +150,9 @@ describe("updateEnabledSections", () => {
     const url = await captureRedirect(() => updateEnabledSections(sectionsForm([])));
 
     expect(mock.argFor("companies", "update")).toEqual({ enabled_sections: [] });
+    expect(redirectPath(url)).toBe("/acme/settings/extensions");
     expect(redirectParams(url).get("ok")).toBe(
-      "Sections updated. All optional sections are off.",
+      "Extensions updated. All optional extensions are off.",
     );
   });
 
@@ -159,7 +163,7 @@ describe("updateEnabledSections", () => {
       updateEnabledSections(sectionsForm(["products"])),
     );
 
-    expect(redirectParams(url).get("ok")).toBe("Sections updated: Products.");
+    expect(redirectParams(url).get("ok")).toBe("Extensions updated: Products.");
   });
 
   it("revalidates the tenant layout so the rail changes", async () => {

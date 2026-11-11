@@ -5,8 +5,10 @@ import {
   SidebarNav,
   type NavItem,
 } from "@/components/tenant/sidebar-nav";
+import { SettingsLink } from "@/components/tenant/settings-link";
 import { UserMenu } from "@/components/tenant/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { initials } from "@/lib/account";
 import { getTenantContext } from "@/lib/auth";
 import { enabledSectionKeys, SECTIONS } from "@/lib/features";
 import { canAdminister, canManage, roleLabel } from "@/lib/roles";
@@ -75,24 +77,20 @@ export async function TenantSidebar({ slug }: { slug: string }) {
       </div>
 
       <div className="flex flex-col items-center gap-2">
+        {/* Settings is a destination, so it sits an arm's length from the
+            account menu rather than inside it — and only for the roles that can
+            open it. */}
+        {canAdminister(role) ? <SettingsLink slug={company.slug} /> : null}
         <ThemeToggle />
         <UserMenu
           name={user.fullName}
           email={user.email}
           avatarUrl={user.avatarUrl}
-          tenantSlug={company.slug}
+          hasPassword={user.hasPassword}
           workspaceName={company.name}
           roleLabel={roleLabel(role)}
-          canAdminister={canAdminister(role)}
         />
       </div>
     </aside>
   );
-}
-
-function initials(value: string): string {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase();
 }

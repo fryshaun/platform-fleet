@@ -31,6 +31,7 @@ const MIGRATION_FILES = [
   "20260101000100_team_invitations.sql",
   "20260101000200_products.sql",
   "20260101000300_assets.sql",
+  "20260101000400_account_avatars.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -41,7 +42,14 @@ const accountsSql = readMigration("20260101000000_accounts_and_companies.sql");
 const invitationSql = readMigration("20260101000100_team_invitations.sql");
 const productsSql = readMigration("20260101000200_products.sql");
 const assetsSql = readMigration("20260101000300_assets.sql");
-const allSql = [accountsSql, invitationSql, productsSql, assetsSql].join("\n");
+const avatarsSql = readMigration("20260101000400_account_avatars.sql");
+const allSql = [
+  accountsSql,
+  invitationSql,
+  productsSql,
+  assetsSql,
+  avatarsSql,
+].join("\n");
 
 type PublicSchema = Database["public"];
 type TableName = keyof PublicSchema["Tables"];
@@ -642,6 +650,44 @@ describe("assets section", () => {
   it("is applied after the modules it builds on", () => {
     expect(MIGRATION_FILES.indexOf("20260101000300_assets.sql")).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101000200_products.sql"),
+    );
+  });
+});
+
+describe("account avatars", () => {
+  it("declares the bucket the uploader writes to, with the same limits", () => {
+    // `lib/account.ts` repeats the size ceiling and the MIME list; these
+    // assertions are what keep the two in step.
+    expect(avatarsSql).toContain("'avatars'");
+    expect(avatarsSql).toContain("2097152");
+    expect(avatarsSql).toContain("'image/png'");
+    expect(avatarsSql).toContain("'image/avif'");
+  });
+
+  it("scopes every write to the caller's own folder", () => {
+    const policies = avatarsSql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies).toHaveLength(4);
+    for (const policy of policies) {
+      expect(policy).toContain("bucket_id = 'avatars'");
+      expect(policy).toContain(
+        "(storage.foldername(name))[1] = (select auth.uid())::text",
+      );
+    }
+  });
+
+  it("asks no company before letting a photo through", () => {
+    // A photo belongs to the account, so a workspace membership — or a switched
+    // off section — must not be part of the decision.
+    expect(avatarsSql).not.toContain("has_company_role");
+    expect(avatarsSql).not.toContain("has_company_section");
+  });
+
+  it("is applied after the profile column it fills", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101000400_account_avatars.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
     );
   });
 });

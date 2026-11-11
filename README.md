@@ -88,6 +88,10 @@ pnpm dev
    `status_changed_at` trigger, and a policy per verb. It asks
    `has_company_section(company_id, 'assets')`, never the products key, so the
    two sections switch independently.
+   `20260101000400_account_avatars.sql` adds the public `avatars` bucket behind
+   the account photo: 2 MB per object, four image types, and a policy per verb
+   comparing the first path segment with `auth.uid()`. No company is consulted —
+   a photo follows the person between workspaces.
 
    A feature module adds its own numbered migration; it never edits the ones
    before it.
@@ -284,11 +288,12 @@ Tests must pass before anything deploys:
 4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
    optional sections the workspace has switched on; **Products** and **Assets**
    are off until an owner or admin enables them on `/{slug}/settings` →
-   Sections. Screens that belong to a section but are gated more tightly hang off
-   it in the rail: **Categories** sits next to Products and is drawn only for
-   managers and up, because that page is manager-only. Settings and billing live
-   in the account menu at the foot of the rail, and both are owner/admin-only — a
-   manager or viewer sees neither.
+   Extensions. Screens that belong to a section but are gated more tightly hang
+   off it in the rail: **Categories** sits next to Products and is drawn only for
+   managers and up, because that page is manager-only. Above the theme switch and
+   the avatar sits a **gear** that opens `/{slug}/settings`, drawn only for owner
+   and admin. The avatar menu itself holds only what belongs to the person: their
+   own settings (a sheet with photo, name and password) and signing out.
 
 ## Team roles and invitations
 
@@ -344,11 +349,46 @@ That badge means "Supabase accepted the send request" and "the person has
 accepted", not "the email was delivered". Delivery confirmation would need an
 email-provider webhook; the app deliberately does not pretend to have one.
 
+## Your account
+
+The avatar at the foot of the rail holds what belongs to the *person* rather than
+to a workspace, and **User settings** opens a sheet — not a route. There is no
+`/account` URL because there is nothing to link to: the sheet is one person's
+business, and a page would mean losing your place on whatever you were doing.
+
+- **Photo** — the browser uploads straight to the public `avatars` bucket through
+  a signed URL (`createAvatarUploadUrl`), and `setAvatar` records the result in
+  `profiles.avatar_url`. Objects are keyed `<user-id>/<uuid>.<ext>`, and every
+  policy in migration 05 compares that first segment with `auth.uid()`, so a
+  session can only write into its own folder. The object it replaces is deleted,
+  so changing a photo ten times leaves one file. 2 MB, PNG/JPEG/WebP/AVIF.
+- **Name** — `profiles.full_name`, trimmed and with runs of spaces collapsed; an
+  empty field is stored as `null`, which every reader treats as "use the email
+  address". The rail, the team list and the menus all read it through
+  `getCurrentUser()`, so the action invalidates the tree from the root layout
+  down (`revalidatePath("/", "layout")`).
+- **Password** — `changePassword` asks for the current password and re-proves it
+  with `signInWithPassword` before calling `auth.updateUser`. Without that step a
+  borrowed browser could change the password that protects the account. An
+  account that signs in with Google has `app_metadata.providers = ["google"]`,
+  so `SessionUser.hasPassword` is false and the form offers "set a password"
+  instead — there is nothing to confirm.
+
+Two limits are worth knowing before you change this:
+
+- These actions **answer** (`useActionState`) instead of redirecting, because a
+  redirect would close the sheet and navigate the page underneath. Every other
+  action in the app redirects with `?error=`/`?ok=`.
+- With Supabase's **Secure password change** setting switched on, GoTrue rejects
+  `updateUser` without a nonce from `reauthenticate()`. Leave it off, or extend
+  `changePassword` to fetch and use one. Changing the email address, and the
+  forgot-password flow, deliberately stay in Supabase's own email templates.
+
 ## The products section
 
 `app/[tenant]/products/` is the template's first domain module and the worked
 example of a *switchable* section. It is off until an owner or admin turns it on
-under **Settings → Sections**; while it is off its routes `notFound()` and every
+under **Settings → Extensions**; while it is off its routes `notFound()` and every
 policy refuses the rows, so it behaves like a part of the app that does not
 exist for that workspace. Switching it back on brings the same rows back —
 nothing is deleted, ever.
@@ -473,7 +513,7 @@ shape from the first: it records *physical* things, it reads one column of anoth
 module, and its day-to-day writer is the front desk rather than a manager.
 
 It switches on the same way — an owner or admin ticks **Assets** under
-**Settings → Sections** — and while it is off its routes `notFound()` and every
+**Settings → Extensions** — and while it is off its routes `notFound()` and every
 policy refuses the rows. Nothing is deleted, ever.
 
 ### What it stores
@@ -675,7 +715,7 @@ breaks every other project on the same port.
 - **`lib/features.ts`** is the section registry: `SECTION_KEYS`, the labels and
   paths the rail and Settings render, and `isSectionEnabled`. The stored switch is
   `companies.enabled_sections` (`text[]`), which an owner or admin edits on
-  Settings → Sections. The database repeats that check in
+  Settings → Extensions. The database repeats that check in
   `has_company_section()`, so the helper decides what the UI *offers* and RLS
   decides what is *reachable*. Adding a section is one entry here plus its routes
   and policies; nothing else enumerates sections. Tier gating, when it comes,
@@ -749,13 +789,21 @@ app/
     assets/                      # fleet deck, filters and the create panel
     assets/[handle]/             # status, product assignment, removal
     fields.ts                    # shared class strings for native form controls
-    settings/                    # company + sections + team cards
+    settings/                    # gear: company details (the index tab)
+    settings/extensions/         # which optional parts of the app are switched on
+    settings/team/               # invitations and roles
     settings/billing/            # plan, portal, invoices
 components/
   tenant/{sidebar-nav,tenant-sidebar,user-menu,page-header}.tsx
+  tenant/tab-nav.tsx             # the settings tab strip: links, not local state
+  tenant/settings-link.tsx       # the gear, drawn for owner and admin only
+  tenant/user-settings-sheet.tsx # photo, name and password, from the avatar menu
+  tenant/avatar-uploader.tsx     # signed upload straight to the avatars bucket
   tenant/form-sheet.tsx          # the shared "new …" slideout
 lib/
   auth.ts                        # session + tenancy data access layer
+  account.ts                     # name, password and avatar rules (client-safe)
+  settings.ts                    # settings tabs: labels and paths (client-safe)
   features.ts                    # optional-section registry + switch (client-safe)
   assets.ts                      # fleet rules + derived availability (client-safe)
   products.ts                    # catalogue rules, money, stock and media (client-safe)
@@ -768,9 +816,9 @@ lib/
   site.ts                        # request origin (validated Host + configured URL)
   subscriptions.ts               # plan catalogue, read from Stripe
   supabase/{client,server,admin,proxy,env,env.server}.ts
-  actions/{auth,billing,company,members,products,settings,support}.ts
+  actions/{account,auth,billing,company,members,products,settings,support}.ts
   actions/assets.ts              # asset writes, with the front-desk status gate
-supabase/migrations/             # schema + RLS (four files)
+supabase/migrations/             # schema + RLS (five files)
 tests/                           # unit, actions, api, integration, db
 ```
 
@@ -869,11 +917,12 @@ runnable:
    same check the page makes, on purpose. Actions never trust the page that
    submitted the form.
 
-4. **Page** — `app/[tenant]/orders/page.tsx`. Copy `settings/page.tsx`: `await
-   connection()`, `getTenantContext(tenant)`, a role gate, then query through
-   `createClient()`. Wrap the authenticated subtree in `<Suspense>` because
-   `getTenantContext` reads cookies. Read `PageProps<"/[tenant]/orders">` — the
-   route types are generated, so the string is checked.
+4. **Page** — `app/[tenant]/orders/page.tsx`. Copy `settings/page.tsx`: call
+   `requireSettingsAccess(tenant)` (its preamble: `await connection()`,
+   `getTenantContext(tenant)`, a role gate), then query through `createClient()`.
+   Wrap the authenticated subtree in `<Suspense>` because `getTenantContext`
+   reads cookies. Read `PageProps<"/[tenant]/orders">` — the route types are
+   generated, so the string is checked.
 
 5. **Navigation and the switch** — add the key to `SECTION_KEYS` in
    `lib/features.ts` with a label, a path and a one-line description, then add an
@@ -881,7 +930,7 @@ runnable:
    assembled in `components/tenant/tenant-sidebar.tsx`, which turns the enabled
    sections into `NavItem`s — that is also where a screen that hangs off a
    section (rather than being one) gets its entry, as Categories does next to
-   Products. The Settings → Sections checklist, the redirect target and the
+   Products. The Settings → Extensions checklist, the redirect target and the
    active state all follow from those lists. Gate the page with
    `isSectionEnabled(company, "orders")` and `notFound()` when it is off, exactly
    as `app/[tenant]/products/page.tsx` does.

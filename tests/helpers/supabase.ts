@@ -160,6 +160,7 @@ export function createSupabaseMock(
       signInWithOtp: vi.fn(async () => ({ data: {}, error: null })),
       verifyOtp: vi.fn(async () => ({ data: {}, error: null })),
       signOut: vi.fn(async () => ({ error: null })),
+      updateUser: vi.fn(async () => ({ data: { user: null }, error: null })),
       exchangeCodeForSession: vi.fn(async () => ({ data: {}, error: null })),
       ...options.auth,
     },

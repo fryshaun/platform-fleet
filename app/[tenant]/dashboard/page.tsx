@@ -103,7 +103,7 @@ async function DashboardContent({
             <li>Invite your team and choose a role for each person.</li>
             <li>Review the plan and the payment details on file.</li>
             <li>
-              Switch on <strong>Products</strong> on Settings → Sections to start
+              Switch on <strong>Products</strong> on Settings → Extensions to start
               a catalogue of products, categories, variants and stock.
             </li>
             <li>

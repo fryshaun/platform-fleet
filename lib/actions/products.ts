@@ -687,7 +687,7 @@ export async function createMediaUploadUrl(input: {
   if (!isSectionEnabled(context.company, "products")) {
     return {
       ok: false,
-      message: "That section is not enabled for this workspace.",
+      message: "That extension is not enabled for this workspace.",
     };
   }
 
@@ -760,7 +760,7 @@ export async function recordMediaUpload(input: {
   if (!isSectionEnabled(context.company, "products")) {
     return {
       ok: false,
-      message: "That section is not enabled for this workspace.",
+      message: "That extension is not enabled for this workspace.",
     };
   }
 

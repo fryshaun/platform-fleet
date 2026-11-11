@@ -3,6 +3,7 @@ import "server-only";
 import { cacheLife } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 
+import { hasPasswordProvider } from "@/lib/account";
 import { createClient } from "@/lib/supabase/server";
 import type {
   MemberRole,
@@ -15,6 +16,11 @@ export type SessionUser = {
   email: string;
   fullName: string | null;
   avatarUrl: string | null;
+  /**
+   * Whether the account has a password to confirm before changing it, or only
+   * an OAuth provider. See `hasPasswordProvider`.
+   */
+  hasPassword: boolean;
 };
 
 export type Company = Tables<"companies">;
@@ -67,6 +73,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     email: user.email ?? "",
     fullName: profile?.full_name ?? null,
     avatarUrl: profile?.avatar_url ?? null,
+    hasPassword: hasPasswordProvider(user.app_metadata?.providers),
   };
 }
 

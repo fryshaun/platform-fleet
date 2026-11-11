@@ -9,6 +9,7 @@ import {
   redirectWith,
 } from "@/lib/actions/support";
 import { parseSectionKeys, SECTIONS } from "@/lib/features";
+import { settingsSegment } from "@/lib/settings";
 
 /** Company name can change; the slug deliberately cannot (it is the URL). */
 export async function updateCompany(formData: FormData) {
@@ -18,7 +19,9 @@ export async function updateCompany(formData: FormData) {
 
   const name = readField(formData, "name");
   if (name.length < 2) {
-    redirectWith(slug, "settings", { error: "Enter a company name." });
+    redirectWith(slug, settingsSegment("company"), {
+      error: "Enter a company name.",
+    });
   }
 
   const { error } = await context.supabase
@@ -27,15 +30,18 @@ export async function updateCompany(formData: FormData) {
     .eq("id", context.company.id);
 
   if (error) {
-    redirectWith(slug, "settings", { error: error.message });
+    redirectWith(slug, settingsSegment("company"), { error: error.message });
   }
 
   revalidatePath(`/${slug}`, "layout");
-  redirectWith(slug, "settings", { ok: "Company updated." });
+  redirectWith(slug, settingsSegment("company"), { ok: "Company updated." });
 }
 
 /**
- * Switches optional sections on and off.
+ * Switches optional extensions on and off.
+ *
+ * The UI calls these "extensions"; the column, the policies and this module
+ * still call them sections.
  *
  * The submitted checkboxes are re-read through `parseSectionKeys`, so the row
  * can only ever hold keys this build knows: the list in `lib/features.ts` is the
@@ -61,16 +67,16 @@ export async function updateEnabledSections(formData: FormData) {
     .eq("id", context.company.id);
 
   if (error) {
-    redirectWith(slug, "settings", { error: error.message });
+    redirectWith(slug, settingsSegment("extensions"), { error: error.message });
   }
 
   // The rail renders the switch, so the whole tenant layout has to refresh.
   revalidatePath(`/${slug}`, "layout");
-  redirectWith(slug, "settings", {
+  redirectWith(slug, settingsSegment("extensions"), {
     ok:
       sections.length === 0
-        ? "Sections updated. All optional sections are off."
-        : `Sections updated: ${sections
+        ? "Extensions updated. All optional extensions are off."
+        : `Extensions updated: ${sections
             .map((key) => SECTIONS[key].label)
             .join(", ")}.`,
   });

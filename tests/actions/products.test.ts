@@ -96,7 +96,7 @@ describe("createProduct", () => {
     // rather than pretending the caller lacks a role.
     expect(redirectPath(url)).toBe("/acme/dashboard");
     expect(redirectParams(url).get("error")).toBe(
-      "That section is not enabled for this workspace.",
+      "That extension is not enabled for this workspace.",
     );
   });
 
@@ -730,7 +730,7 @@ describe("createMediaUploadUrl", () => {
 
     expect(result).toEqual({
       ok: false,
-      message: "That section is not enabled for this workspace.",
+      message: "That extension is not enabled for this workspace.",
     });
   });
 });

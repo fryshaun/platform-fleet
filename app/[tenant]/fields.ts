@@ -3,7 +3,7 @@
  *
  * The UI kit ships Button, Input, Label and Badge but no select or textarea, so
  * each section styles the native elements directly — the same approach
- * `settings/members-section.tsx` takes for its role picker. The strings live
+ * `settings/team/members-section.tsx` takes for its role picker. The strings live
  * here, one level above the sections, so a section never has to import from
  * another one to render a `<select>`.
  */
