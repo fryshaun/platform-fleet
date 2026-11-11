@@ -6,6 +6,7 @@ import {
   BoxesIcon,
   LayoutDashboardIcon,
   PackageIcon,
+  TagsIcon,
 } from "lucide-react";
 
 import {
@@ -14,60 +15,65 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { SECTIONS, type SectionKey } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
-type NavItem = {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboardIcon;
-};
-
-/** One icon per section; the labels and paths come from `lib/features.ts`. */
-const SECTION_ICONS: Record<SectionKey, typeof LayoutDashboardIcon> = {
+/** The icons the rail can draw. Callers name one instead of importing it. */
+const NAV_ICONS = {
+  dashboard: LayoutDashboardIcon,
   products: PackageIcon,
   assets: BoxesIcon,
+  categories: TagsIcon,
+} as const;
+
+export type NavIcon = keyof typeof NAV_ICONS;
+
+/**
+ * One entry in the rail.
+ *
+ * Plain data on purpose: the sidebar is a Server Component, and a component —
+ * an icon included — cannot be handed to this Client Component as a prop. A
+ * name can.
+ */
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: NavIcon;
 };
 
 /**
  * Primary navigation for a tenant.
  *
- * Each section is a folder under `app/[tenant]/`: add it to `SECTION_KEYS` and it
- * appears in the rail with the active state already wired up — the caller
- * decides *which* sections a workspace gets, this component only renders them.
+ * The caller decides which entries a workspace gets — the sections from
+ * `lib/features.ts`, plus the screens that hang off one — and this component
+ * only renders them and works out which entry is current. The current entry is
+ * the *longest* href that matches the path, so `/t/products/categories` lights
+ * Categories without lighting Products as well.
+ *
  * Settings and billing are deliberately absent: both are admin-only and visited
  * rarely, so they live in the account menu instead of holding a permanent slot
  * here.
  */
-export function SidebarNav({
-  tenantSlug,
-  sections,
-}: {
-  tenantSlug: string;
-  sections: readonly SectionKey[];
-}) {
+export function SidebarNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
 
-  const items: NavItem[] = [
-    {
-      href: `/${tenantSlug}/dashboard`,
-      label: "Dashboard",
-      icon: LayoutDashboardIcon,
-    },
-    ...sections.map((key) => ({
-      href: `/${tenantSlug}/${SECTIONS[key].path}`,
-      label: SECTIONS[key].label,
-      icon: SECTION_ICONS[key],
-    })),
-  ];
+  const activeHref = items
+    .filter(
+      (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+    )
+    .reduce<string | undefined>(
+      (longest, item) =>
+        longest === undefined || item.href.length > longest.length
+          ? item.href
+          : longest,
+      undefined,
+    );
 
   return (
     <TooltipProvider delayDuration={300}>
       <nav aria-label="Workspace" className="flex flex-col items-center gap-1">
         {items.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
+          const isActive = item.href === activeHref;
+          const Icon = NAV_ICONS[item.icon];
 
           return (
             <Tooltip key={item.href}>
@@ -92,3 +98,4 @@ export function SidebarNav({
     </TooltipProvider>
   );
 }
+

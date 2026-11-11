@@ -46,6 +46,39 @@ export function isAssetStatus(value: unknown): value is AssetStatus {
 }
 
 // -----------------------------------------------------------------------------
+// Reading order
+// -----------------------------------------------------------------------------
+/**
+ * The orders the fleet index can be read in.
+ *
+ * `name` is the default and the order the fleet has always been listed in.
+ * `status` groups the units a shopkeeper scans for first — available, then out
+ * of action, then retired — because PostgreSQL orders an enum by the way it was
+ * declared in the migration. `newest` reads the rows in the order they were
+ * added, which is how someone checking their own work wants them.
+ */
+export const ASSET_SORT_OPTIONS = [
+  { value: "name", label: "Name A–Z" },
+  { value: "name-desc", label: "Name Z–A" },
+  { value: "newest", label: "Newest first" },
+  { value: "status", label: "Status" },
+] as const;
+
+export type AssetSort = (typeof ASSET_SORT_OPTIONS)[number]["value"];
+
+/**
+ * The `?sort=` to use, falling back to `name`.
+ *
+ * Anything unknown — a hand-typed URL, a stale bookmark — reads as the default
+ * rather than as an error, the same way an unknown `?status=` is ignored.
+ */
+export function readAssetSort(value: unknown): AssetSort {
+  return (
+    ASSET_SORT_OPTIONS.find((option) => option.value === value)?.value ?? "name"
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Handles, names and serials
 // -----------------------------------------------------------------------------
 /**
@@ -92,6 +125,16 @@ export function serialProblem(serial: string): string | null {
   }
   return null;
 }
+
+/**
+ * The DOM id of the "new asset" panel's form.
+ *
+ * The panel keeps its submit button in a footer *outside* the `<form>` — that is
+ * what lets Cancel and Add asset sit side by side in the footer — so the button
+ * and the form have to agree on this string. It lives here, away from both, so
+ * neither side can drift without the other noticing.
+ */
+export const NEW_ASSET_FORM_ID = "asset-new-form";
 
 // -----------------------------------------------------------------------------
 // Availability

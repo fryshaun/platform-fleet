@@ -5,35 +5,35 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { FormMessage } from "@/components/form-message";
+import { FormSheet } from "@/components/tenant/form-sheet";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
+  ASSET_SORT_OPTIONS,
   ASSET_STATUS_OPTIONS,
   availabilityLabel,
   isAssetStatus,
+  NEW_ASSET_FORM_ID,
+  readAssetSort,
   summariseAssets,
-  type Asset,
 } from "@/lib/assets";
 import { getTenantContext } from "@/lib/auth";
 import { isSectionEnabled } from "@/lib/features";
+import { firstImagePerProduct } from "@/lib/product-media";
 import { canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
 import { SELECT_CLASSES } from "../fields";
-import { AssetStatusBadge } from "./asset-badges";
-import { AssetForm } from "./asset-form";
+import { AssetDeck } from "./asset-deck";
+import { AssetFields } from "./asset-fields";
 
 export const metadata: Metadata = {
   title: "Assets",
 };
+
+/** The default order, and the one the Reset link returns to. */
+const DEFAULT_ASSET_SORT = ASSET_SORT_OPTIONS[0].value;
 
 export default function AssetsPage({
   params,
@@ -71,9 +71,12 @@ async function AssetsContent({
 
   const statusParam = readParam(query.status);
   const status = statusParam && isAssetStatus(statusParam) ? statusParam : null;
+  const sort = readAssetSort(readParam(query.sort));
 
   const supabase = await createClient();
 
+  // The filter and the order are applied in SQL rather than in JavaScript so a
+  // large fleet still renders in one request instead of loading every row first.
   let assetQuery = supabase
     .from("assets")
     .select("*")
@@ -83,13 +86,30 @@ async function AssetsContent({
     assetQuery = assetQuery.eq("status", status);
   }
 
-  const { data: assetRows } = await assetQuery
-    .order("name", { ascending: true })
-    .order("created_at", { ascending: true });
+  switch (sort) {
+    case "name-desc":
+      assetQuery = assetQuery.order("name", { ascending: false });
+      break;
+    case "newest":
+      assetQuery = assetQuery.order("created_at", { ascending: false });
+      break;
+    case "status":
+      assetQuery = assetQuery
+        .order("status", { ascending: true })
+        .order("name", { ascending: true });
+      break;
+    default:
+      assetQuery = assetQuery
+        .order("name", { ascending: true })
+        .order("created_at", { ascending: true });
+  }
 
-  // The product picker reads the catalogue, so it is only offered when the
-  // products section is on. The fleet itself never depends on it: this page and
-  // every policy work with the products section switched off.
+  const { data: assetRows } = await assetQuery;
+
+  // The product picker and the card images both read the catalogue, so neither
+  // is offered when the products section is off. The fleet itself never depends
+  // on it: this page and every policy work with the products section switched
+  // off.
   const products = isSectionEnabled(company, "products")
     ? (
         await supabase
@@ -101,15 +121,61 @@ async function AssetsContent({
     : [];
 
   const assets = assetRows ?? [];
+  const images = await firstImagePerProduct(
+    supabase,
+    company.id,
+    assets.map((asset) => asset.product_id),
+  );
+
   const canEdit = canManage(role);
   const filtered = Boolean(status);
-  const labels = new Map(products.map((product) => [product.id, product.title]));
+  const productTitles = new Map(
+    products.map((product) => [product.id, product.title]),
+  );
+
+  const { total, outOfService, retired } = summariseAssets(assets);
+  const summary =
+    total === 0
+      ? filtered
+        ? "Nothing matches this filter."
+        : "No units recorded yet."
+      : [
+          `${total} unit${total === 1 ? "" : "s"}`,
+          availabilityLabel(assets),
+          outOfService > 0 ? `${outOfService} out of action` : null,
+          retired > 0 ? `${retired} retired` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6 lg:p-10">
       <PageHeader
         title="Assets"
         description="The individual units behind each product. Staff only — customers never see this page."
+        actions={
+          canEdit ? (
+            <FormSheet
+              triggerLabel="New asset"
+              title="New asset"
+              description="One row per physical unit — a bike, a boat, a room. It is linked to a product so its name, image and stock come from the catalogue."
+              formId={NEW_ASSET_FORM_ID}
+              submitLabel="Add asset"
+            >
+              {/* The error message belongs in the panel too: a failed submit
+                  comes back to this page, and the panel would otherwise hide
+                  the explanation it arrived with. */}
+              <FormMessage error={readParam(query.error)} />
+              <AssetFields
+                slug={company.slug}
+                products={products}
+                layout="panel"
+                formId={NEW_ASSET_FORM_ID}
+                showSubmit={false}
+              />
+            </FormSheet>
+          ) : undefined
+        }
       />
 
       <FormMessage
@@ -117,7 +183,11 @@ async function AssetsContent({
         success={readParam(query.ok)}
       />
 
-      <form method="get" className="grid gap-3 sm:grid-cols-[14rem_auto] sm:items-end">
+      <form
+        method="get"
+        aria-label="Filter and sort the fleet"
+        className="grid gap-3 sm:grid-cols-[minmax(0,13rem)_minmax(0,13rem)_auto] sm:items-end"
+      >
         <label className="space-y-2 text-sm">
           <span className="font-medium">Status</span>
           <select
@@ -134,90 +204,64 @@ async function AssetsContent({
           </select>
         </label>
 
-        <Button type="submit" variant="outline" className="self-end">
-          Filter
-        </Button>
+        <label className="space-y-2 text-sm">
+          <span className="font-medium">Sort</span>
+          <select name="sort" defaultValue={sort} className={SELECT_CLASSES}>
+            {ASSET_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" variant="outline">
+            Apply
+          </Button>
+          {status || sort !== DEFAULT_ASSET_SORT ? (
+            <Button type="button" variant="ghost" asChild>
+              <Link href={`/${company.slug}/assets`}>Reset</Link>
+            </Button>
+          ) : null}
+        </div>
       </form>
 
-      <FleetCard
-        slug={company.slug}
-        assets={assets}
-        labels={labels}
-        filtered={filtered}
-        canEdit={canEdit}
-      />
+      <section aria-labelledby="fleet-heading" className="space-y-4">
+        <div className="space-y-1">
+          <h2
+            id="fleet-heading"
+            className="text-lg font-semibold tracking-tight"
+          >
+            Fleet
+          </h2>
+          <p className="text-muted-foreground text-sm">{summary}</p>
+        </div>
 
-      {canEdit ? <AssetForm slug={company.slug} products={products} /> : null}
-    </div>
-  );
-}
-
-function FleetCard({
-  slug,
-  assets,
-  labels,
-  filtered,
-  canEdit,
-}: {
-  slug: string;
-  assets: Asset[];
-  labels: Map<string, string>;
-  filtered: boolean;
-  canEdit: boolean;
-}) {
-  const { total, outOfService } = summariseAssets(assets);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Fleet</CardTitle>
-        <CardDescription>
-          {total === 0
-            ? filtered
-              ? "Nothing matches this filter."
-              : "No assets yet."
-            : `${total} unit${total === 1 ? "" : "s"} · ${availabilityLabel(assets)}${
-                outOfService > 0 ? ` · ${outOfService} out of action` : ""
-              }`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {total === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {canEdit
-              ? "Add the first unit below. Availability is counted from these rows, so record one unit per bike, boat or room."
-              : "An owner, admin or manager can add the first unit."}
-          </p>
+        {assets.length === 0 ? (
+          <div className="text-muted-foreground flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center text-sm">
+            <p>
+              {filtered
+                ? "Nothing matches this filter."
+                : canEdit
+                  ? "No assets yet. Use “New asset” at the top of the page to record the first unit — one row per bike, boat or room."
+                  : "No assets yet. An owner, admin or manager can add the first unit."}
+            </p>
+            {filtered ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/${company.slug}/assets`}>Clear filter</Link>
+              </Button>
+            ) : null}
+          </div>
         ) : (
-          <ul className="divide-border divide-y rounded-xl border">
-            {assets.map((asset) => (
-              <li key={asset.id} className="px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/${slug}/assets/${asset.handle}`}
-                      className="block truncate text-sm font-medium underline-offset-4 hover:underline"
-                    >
-                      {asset.name}
-                    </Link>
-                    <p className="text-muted-foreground truncate text-xs">
-                      /{asset.handle}
-                      {asset.serial ? ` · ${asset.serial}` : ""}
-                      {asset.product_id
-                        ? ` · ${labels.get(asset.product_id) ?? "Assigned to a product"}`
-                        : " · Not assigned"}
-                    </p>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <AssetStatusBadge status={asset.status} />
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <AssetDeck
+            slug={company.slug}
+            assets={assets}
+            images={images}
+            productTitles={productTitles}
+          />
         )}
-      </CardContent>
-    </Card>
+      </section>
+    </div>
   );
 }

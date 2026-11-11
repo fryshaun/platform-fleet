@@ -5,34 +5,34 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { FormMessage } from "@/components/form-message";
+import { FormSheet } from "@/components/tenant/form-sheet";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { getTenantContext } from "@/lib/auth";
 import { isSectionEnabled } from "@/lib/features";
+import { firstImagePerProduct } from "@/lib/product-media";
 import {
-  familyPriceLabel,
   groupVariants,
   isProductStatus,
-  type Product,
-  type ProductFamily,
+  NEW_PRODUCT_FORM_ID,
+  PRODUCT_SORT_OPTIONS,
+  PRODUCT_STATUS_OPTIONS,
+  readProductSort,
 } from "@/lib/products";
 import { canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
 import { SELECT_CLASSES } from "../fields";
-import { ProductStatusBadge, StockBadge } from "./product-badges";
+import { ProductDeck } from "./product-deck";
+import { ProductFields } from "./product-fields";
 
 export const metadata: Metadata = {
   title: "Products",
 };
+
+/** The default order, and the one the Reset link returns to. */
+const DEFAULT_PRODUCT_SORT = PRODUCT_SORT_OPTIONS[0].value;
 
 export default function ProductsPage({
   params,
@@ -40,7 +40,7 @@ export default function ProductsPage({
 }: PageProps<"/[tenant]/products">) {
   return (
     <main className="flex-1">
-      <Suspense fallback={<PageSkeleton />}>
+      <Suspense fallback={<PageSkeleton rows={2} />}>
         <ProductsContent params={params} searchParams={searchParams} />
       </Suspense>
     </main>
@@ -72,9 +72,12 @@ async function ProductsContent({
   const status =
     statusParam && isProductStatus(statusParam) ? statusParam : null;
   const categoryId = readParam(query.category) || null;
+  const sort = readProductSort(readParam(query.sort));
 
   const supabase = await createClient();
 
+  // The category list feeds both the filter and the panel's picker, so it is
+  // read once, in the same order the categories page shows them.
   const { data: categoryRows } = await supabase
     .from("product_categories")
     .select("id, name")
@@ -82,8 +85,9 @@ async function ProductsContent({
     .order("position", { ascending: true })
     .order("name", { ascending: true });
 
-  // The filters are applied in SQL rather than in JavaScript so a long catalogue
-  // still renders in one request instead of loading every row first.
+  // The filters and the order are applied in SQL rather than in JavaScript so a
+  // long catalogue still renders in one request instead of loading every row
+  // first.
   let productQuery = supabase
     .from("products")
     .select("*")
@@ -96,14 +100,66 @@ async function ProductsContent({
     productQuery = productQuery.eq("category_id", categoryId);
   }
 
-  const { data: productRows } = await productQuery.order("title", {
-    ascending: true,
-  });
+  switch (sort) {
+    case "title-desc":
+      productQuery = productQuery.order("title", { ascending: false });
+      break;
+    case "newest":
+      productQuery = productQuery.order("created_at", { ascending: false });
+      break;
+    case "price-asc":
+      productQuery = productQuery
+        .order("price_cents", { ascending: true })
+        .order("title", { ascending: true });
+      break;
+    case "price-desc":
+      productQuery = productQuery
+        .order("price_cents", { ascending: false })
+        .order("title", { ascending: true });
+      break;
+    default:
+      productQuery = productQuery.order("title", { ascending: true });
+  }
+
+  const { data: productRows } = await productQuery;
 
   const families = groupVariants(productRows ?? []);
   const categories = categoryRows ?? [];
   const canEdit = canManage(role);
   const filtered = Boolean(status || categoryId);
+
+  // Every row the deck can draw a picture for: the parents, plus their variants
+  // — a family whose photos only live on one variant still gets a picture.
+  const images = await firstImagePerProduct(
+    supabase,
+    company.id,
+    families.flatMap((family) => [
+      family.parent.id,
+      ...family.variants.map((variant) => variant.id),
+    ]),
+  );
+
+  const variantCount = families.reduce(
+    (total, family) => total + family.variants.length,
+    0,
+  );
+  const activeCount = families.filter(
+    (family) => family.parent.status === "active",
+  ).length;
+  const summary =
+    families.length === 0
+      ? filtered
+        ? "Nothing matches these filters."
+        : "No products yet."
+      : [
+          `${families.length} product${families.length === 1 ? "" : "s"}`,
+          variantCount > 0
+            ? `${variantCount} variant${variantCount === 1 ? "" : "s"}`
+            : null,
+          `${activeCount} active`,
+        ]
+          .filter(Boolean)
+          .join(" · ");
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6 lg:p-10">
@@ -112,15 +168,32 @@ async function ProductsContent({
         description="Everything this workspace sells: categories, variants, stock and gallery."
         actions={
           <>
-            <Button variant="outline" asChild>
+            <Button variant="outline" size="sm" asChild>
               <Link href={`/${company.slug}/products/categories`}>
                 Categories
               </Link>
             </Button>
             {canEdit ? (
-              <Button asChild>
-                <Link href={`/${company.slug}/products/new`}>New product</Link>
-              </Button>
+              <FormSheet
+                triggerLabel="New product"
+                title="New product"
+                description="Start with the basics. Stock, variants, dates and media are added from the product page afterwards."
+                formId={NEW_PRODUCT_FORM_ID}
+                submitLabel="Create product"
+              >
+                {/* The error message belongs in the panel too: a failed submit
+                    comes back to this page, and the panel would otherwise hide
+                    the explanation it arrived with. */}
+                <FormMessage error={readParam(query.error)} />
+                <ProductFields
+                  slug={company.slug}
+                  categories={categories}
+                  layout="panel"
+                  formId={NEW_PRODUCT_FORM_ID}
+                  surface="panel"
+                  showSubmit={false}
+                />
+              </FormSheet>
             ) : null}
           </>
         }
@@ -133,7 +206,8 @@ async function ProductsContent({
 
       <form
         method="get"
-        className="grid gap-3 sm:grid-cols-[10rem_14rem_auto] sm:items-end"
+        aria-label="Filter and sort the catalogue"
+        className="grid gap-3 sm:grid-cols-[minmax(0,11rem)_minmax(0,13rem)_minmax(0,11rem)_auto] sm:items-end"
       >
         <label className="space-y-2 text-sm">
           <span className="font-medium">Status</span>
@@ -143,9 +217,11 @@ async function ProductsContent({
             className={SELECT_CLASSES}
           >
             <option value="">Any status</option>
-            <option value="draft">Draft</option>
-            <option value="active">Active</option>
-            <option value="archived">Archived</option>
+            {PRODUCT_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -165,115 +241,63 @@ async function ProductsContent({
           </select>
         </label>
 
-        <Button type="submit" variant="outline">
-          Filter
-        </Button>
+        <label className="space-y-2 text-sm">
+          <span className="font-medium">Sort</span>
+          <select name="sort" defaultValue={sort} className={SELECT_CLASSES}>
+            {PRODUCT_SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex items-center gap-2">
+          <Button type="submit" variant="outline">
+            Apply
+          </Button>
+          {filtered || sort !== DEFAULT_PRODUCT_SORT ? (
+            <Button type="button" variant="ghost" asChild>
+              <Link href={`/${company.slug}/products`}>Reset</Link>
+            </Button>
+          ) : null}
+        </div>
       </form>
 
-      <CatalogueCard
-        slug={company.slug}
-        families={families}
-        canEdit={canEdit}
-        filtered={filtered}
-      />
-    </div>
-  );
-}
+      <section aria-labelledby="catalogue-heading" className="space-y-4">
+        <div className="space-y-1">
+          <h2
+            id="catalogue-heading"
+            className="text-lg font-semibold tracking-tight"
+          >
+            Catalogue
+          </h2>
+          <p className="text-muted-foreground text-sm">{summary}</p>
+        </div>
 
-function CatalogueCard({
-  slug,
-  families,
-  canEdit,
-  filtered,
-}: {
-  slug: string;
-  families: ProductFamily[];
-  canEdit: boolean;
-  filtered: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Catalogue</CardTitle>
-        <CardDescription>
-          {families.length === 0
-            ? filtered
-              ? "Nothing matches these filters."
-              : "No products yet."
-            : `${families.length} product${families.length === 1 ? "" : "s"} in this workspace.`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
         {families.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {canEdit ? (
-              <>
-                <Link
-                  href={`/${slug}/products/new`}
-                  className="text-foreground underline underline-offset-4"
-                >
-                  Add the first product
-                </Link>{" "}
-                to start the catalogue.
-              </>
-            ) : (
-              "An owner, admin or manager can add the first product."
-            )}
-          </p>
+          <div className="text-muted-foreground flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center text-sm">
+            <p>
+              {filtered
+                ? "Nothing matches these filters."
+                : canEdit
+                  ? "No products yet. Use “New product” at the top of the page to add the first one — variants, stock and media follow on its own page."
+                  : "No products yet. An owner, admin or manager can add the first one."}
+            </p>
+            {filtered ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/${company.slug}/products`}>Clear filters</Link>
+              </Button>
+            ) : null}
+          </div>
         ) : (
-          <ul className="divide-border divide-y rounded-xl border">
-            {families.map((family) => (
-              <li key={family.parent.id} className="px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <Link
-                      href={`/${slug}/products/${family.parent.handle}`}
-                      className="block truncate text-sm font-medium underline-offset-4 hover:underline"
-                    >
-                      {family.parent.title}
-                    </Link>
-                    <p className="text-muted-foreground truncate text-xs">
-                      /{family.parent.handle} · {familyPriceLabel(family)}
-                    </p>
-                  </div>
-
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <ProductStatusBadge status={family.parent.status} />
-                    <StockBadge product={family.parent} />
-                  </div>
-                </div>
-
-                {family.variants.length > 0 ? (
-                  <ul className="text-muted-foreground mt-2 space-y-1 border-l pl-3 text-xs">
-                    {family.variants.map((variant) => (
-                      <li key={variant.id}>
-                        <VariantLine slug={slug} variant={variant} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <ProductDeck
+            slug={company.slug}
+            families={families}
+            images={images}
+          />
         )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function VariantLine({ slug, variant }: { slug: string; variant: Product }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <Link
-        href={`/${slug}/products/${variant.handle}`}
-        className="truncate underline-offset-4 hover:underline"
-      >
-        {variant.title}
-      </Link>
-      <div className="flex shrink-0 items-center gap-2">
-        <ProductStatusBadge status={variant.status} />
-        <StockBadge product={variant} />
-      </div>
+      </section>
     </div>
   );
 }

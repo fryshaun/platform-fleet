@@ -93,6 +93,21 @@ function productPath(formData: FormData): string {
   return handle ? `products/${handle}` : "products";
 }
 
+/**
+ * Where a failed create returns to.
+ *
+ * The same fields are posted from two places: the slideout on the index and the
+ * standalone `/products/new` page. A hidden `surface=panel` says which one, so
+ * the error lands back in the form the author was using instead of closing the
+ * panel and handing them a different page. A flag rather than a path, so nothing
+ * the browser sends can steer the redirect.
+ */
+function createErrorPath(formData: FormData): string {
+  return readField(formData, "surface") === "panel"
+    ? "products"
+    : "products/new";
+}
+
 /** Reads and validates the fields shared by create and update. */
 function readProductDraft(
   formData: FormData,
@@ -178,7 +193,7 @@ export async function createProduct(formData: FormData) {
 
   const parsed = readProductDraft(formData);
   if ("error" in parsed) {
-    redirectWith(slug, "products/new", { error: parsed.error });
+    redirectWith(slug, createErrorPath(formData), { error: parsed.error });
   }
 
   const { error } = await context.supabase.from("products").insert({
@@ -191,7 +206,7 @@ export async function createProduct(formData: FormData) {
   });
 
   if (error) {
-    redirectWith(slug, "products/new", {
+    redirectWith(slug, createErrorPath(formData), {
       error: writeErrorMessage(error, "That product address is already in use."),
     });
   }

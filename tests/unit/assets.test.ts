@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSET_SORT_OPTIONS,
   ASSET_STATUS_LABELS,
   ASSET_STATUS_OPTIONS,
   ASSET_STATUSES,
@@ -14,6 +15,7 @@ import {
   formatStatusChanged,
   isAssetAvailable,
   isAssetStatus,
+  readAssetSort,
   serialProblem,
   summariseAssets,
 } from "@/lib/assets";
@@ -44,6 +46,24 @@ describe("asset statuses", () => {
 
   it("labels a status the way the pill spells it", () => {
     expect(assetStatusLabel("maintenance")).toBe("Out of action");
+  });
+});
+
+describe("readAssetSort", () => {
+  it("keeps a known order", () => {
+    for (const option of ASSET_SORT_OPTIONS) {
+      expect(readAssetSort(option.value)).toBe(option.value);
+    }
+  });
+
+  it("falls back to name for anything else", () => {
+    for (const value of ["", "size", "NAME", null, undefined, 2]) {
+      expect(readAssetSort(value)).toBe("name");
+    }
+  });
+
+  it("starts with name, so the default needs no query", () => {
+    expect(ASSET_SORT_OPTIONS[0].value).toBe("name");
   });
 });
 

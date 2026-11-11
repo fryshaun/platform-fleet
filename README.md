@@ -284,8 +284,11 @@ Tests must pass before anything deploys:
 4. `/{slug}/dashboard` is the workspace. The rail carries the dashboard plus the
    optional sections the workspace has switched on; **Products** and **Assets**
    are off until an owner or admin enables them on `/{slug}/settings` →
-   Sections. Settings and billing live in the account menu at the foot of the
-   rail, and both are owner/admin-only — a manager or viewer sees neither.
+   Sections. Screens that belong to a section but are gated more tightly hang off
+   it in the rail: **Categories** sits next to Products and is drawn only for
+   managers and up, because that page is manager-only. Settings and billing live
+   in the account menu at the foot of the rail, and both are owner/admin-only — a
+   manager or viewer sees neither.
 
 ## Team roles and invitations
 
@@ -380,6 +383,47 @@ row therefore cannot point at another tenant's row even if a policy were wrong,
 because the key itself refuses it. Deleting a category leaves its products
 behind, uncategorised (`on delete set null (category_id)`); deleting a product
 cascades to its variants, dates and gallery rows.
+
+### The catalogue index
+
+`/products` is a deck of cards, one per product family, with a filter form above
+it. Three decisions keep it from becoming a JavaScript page:
+
+- **The filters are a plain `GET` form.** Status, category and order arrive as
+  `?status=`, `?category=` and `?sort=` and are applied in SQL, so a long
+  catalogue renders in one request and the page works with no JavaScript. An
+  unknown value reads as "no filter" or "default order" rather than as an error
+  (`readProductSort` in `lib/products.ts`), so a stale bookmark still renders.
+- **Creating one happens in a slideout, not on its own page.** The header button
+  is `components/tenant/form-sheet.tsx`, shared with the assets section; the
+  fields inside it are the same `ProductFields` the edit card uses, rendered on
+  the server and handed in as children. The footer's submit button sits outside
+  the `<form>` and reaches it with `form={NEW_PRODUCT_FORM_ID}`, which is why the
+  id is a constant in `lib/products.ts` rather than a literal in two files.
+- **The cards lead with a picture.** `firstImagePerProduct()` in
+  `lib/product-media.ts` reads the gallery once per page for every product on it
+  and resolves `url` or the public `storage_path` into a plain URL, falling back
+  to the first variant that has one.
+
+A create that fails is redirected back with `?error=`, and to the surface the
+form was posted from: a hidden `surface=panel` field sends it to the index, so
+the panel reopens with the message instead of closing and landing the author on
+a different page. `/products/new` is still there as the full-page form (and the
+no-JavaScript path), and it posts `surface=page`.
+
+`/products/categories` is built the same way, so the two screens read alike. The
+search box and the order are `?q=` and `?sort=` and are applied in SQL — except
+"most products", which needs the per-category counts the page derives, so that
+one order is applied once the rows are in. `categorySearchTerm()` in
+`lib/products.ts` is what keeps a typed query safe to splice into PostgREST's
+`or()` filter. The header button opens the same `FormSheet` around
+`CategoryFields`, and the footer submits through `NEW_CATEGORY_FORM_ID`.
+
+One thing differs, because a category has no page of its own: a card *is* its
+edit form. `CategoryFields` therefore owns the `<form>` and takes a slot for the
+buttons that belong to it, and the card's Delete button posts `deleteCategory`
+from inside that form with `formAction` — one row of fields and two buttons,
+without nesting a `<form>` inside a `<form>`.
 
 ### Who may do what
 
@@ -698,22 +742,24 @@ app/
     layout.tsx                   # icon rail shell + account menu
     page.tsx                     # redirects to the dashboard
     dashboard/                   # the workspace overview
-    products/                    # products section (categories, variants, stock, gallery)
-    products/new/                # create a product
+    products/                    # catalogue deck, filters and the create panel
+    products/new/                # the full-page create form (no-JS fallback)
     products/[handle]/           # details, stock, dates, variants, gallery
-    products/categories/         # aisle management
-    assets/                      # assets section (the units behind a product)
+    products/categories/         # aisles: search, sorted deck of edit cards
+    assets/                      # fleet deck, filters and the create panel
     assets/[handle]/             # status, product assignment, removal
     fields.ts                    # shared class strings for native form controls
     settings/                    # company + sections + team cards
     settings/billing/            # plan, portal, invoices
 components/
   tenant/{sidebar-nav,tenant-sidebar,user-menu,page-header}.tsx
+  tenant/form-sheet.tsx          # the shared "new …" slideout
 lib/
   auth.ts                        # session + tenancy data access layer
   features.ts                    # optional-section registry + switch (client-safe)
   assets.ts                      # fleet rules + derived availability (client-safe)
   products.ts                    # catalogue rules, money, stock and media (client-safe)
+  product-media.ts               # first image per product, one query per page
   roles.ts                       # labels + authorization predicates (client-safe)
   safe-redirect.ts               # post-login `next` validation (client-safe)
   billing/{checkout,sync}.ts     # Checkout payloads + subscription reconciliation
@@ -831,9 +877,12 @@ runnable:
 
 5. **Navigation and the switch** — add the key to `SECTION_KEYS` in
    `lib/features.ts` with a label, a path and a one-line description, then add an
-   icon to `SECTION_ICONS` in `components/tenant/sidebar-nav.tsx`. The rail, the
-   Settings → Sections checklist, the redirect target and the active state all
-   follow from those two lists. Gate the page with
+   icon to `NAV_ICONS` in `components/tenant/sidebar-nav.tsx`. The rail itself is
+   assembled in `components/tenant/tenant-sidebar.tsx`, which turns the enabled
+   sections into `NavItem`s — that is also where a screen that hangs off a
+   section (rather than being one) gets its entry, as Categories does next to
+   Products. The Settings → Sections checklist, the redirect target and the
+   active state all follow from those lists. Gate the page with
    `isSectionEnabled(company, "orders")` and `notFound()` when it is off, exactly
    as `app/[tenant]/products/page.tsx` does.
 

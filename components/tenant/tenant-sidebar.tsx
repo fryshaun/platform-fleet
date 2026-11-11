@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { connection } from "next/server";
 
-import { SidebarNav } from "@/components/tenant/sidebar-nav";
+import {
+  SidebarNav,
+  type NavItem,
+} from "@/components/tenant/sidebar-nav";
 import { UserMenu } from "@/components/tenant/user-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getTenantContext } from "@/lib/auth";
-import { enabledSectionKeys } from "@/lib/features";
-import { canAdminister, roleLabel } from "@/lib/roles";
+import { enabledSectionKeys, SECTIONS } from "@/lib/features";
+import { canAdminister, canManage, roleLabel } from "@/lib/roles";
 
 /**
  * Icon rail for a single tenant.
@@ -23,10 +26,41 @@ export async function TenantSidebar({ slug }: { slug: string }) {
 
   const { company, role, user } = await getTenantContext(slug);
 
+  const sections = enabledSectionKeys(company);
+  const items: NavItem[] = [
+    {
+      href: `/${company.slug}/dashboard`,
+      label: "Dashboard",
+      icon: "dashboard",
+    },
+    ...sections.flatMap((key): NavItem[] => {
+      const item: NavItem = {
+        href: `/${company.slug}/${SECTIONS[key].path}`,
+        label: SECTIONS[key].label,
+        icon: key,
+      };
+
+      // Categories belong to the products section but are a screen of their
+      // own, and a manager-only one: they sit next to Products in the rail
+      // rather than behind a link on the catalogue page, and a role that cannot
+      // open them does not see the icon.
+      return key === "products" && canManage(role)
+        ? [
+            item,
+            {
+              href: `${item.href}/categories`,
+              label: "Categories",
+              icon: "categories",
+            },
+          ]
+        : [item];
+    }),
+  ];
+
   return (
     <aside
       aria-label="Workspace navigation"
-      className="bg-sidebar border-border flex w-14 shrink-0 flex-col items-center justify-between border-r py-3"
+      className="bg-sidebar border-none flex w-14 shrink-0 flex-col items-center justify-between border-r py-3"
     >
       <div className="flex flex-col items-center gap-3">
         <Link
@@ -37,10 +71,7 @@ export async function TenantSidebar({ slug }: { slug: string }) {
           {initials(company.name)}
         </Link>
 
-        <SidebarNav
-          tenantSlug={company.slug}
-          sections={enabledSectionKeys(company)}
-        />
+        <SidebarNav items={items} />
       </div>
 
       <div className="flex flex-col items-center gap-2">

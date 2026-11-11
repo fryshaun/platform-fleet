@@ -111,6 +111,19 @@ describe("createProduct", () => {
     expect(redirectParams(url).get("error")).toBe("Enter a product name.");
   });
 
+  it("returns a failed panel submit to the index the panel lives on", async () => {
+    setup();
+
+    const url = await captureRedirect(() =>
+      createProduct(formDataOf({ ...DRAFT, title: " A ", surface: "panel" })),
+    );
+
+    // Both surfaces post the same fields; only the way back differs, so a
+    // mistyped name in the slideout does not close it and change the page.
+    expect(redirectPath(url)).toBe("/acme/products");
+    expect(redirectParams(url).get("error")).toBe("Enter a product name.");
+  });
+
   it("derives the address and stores the price in minor units", async () => {
     const mock = setup();
 
