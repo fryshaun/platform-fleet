@@ -758,6 +758,13 @@ breaks every other project on the same port.
   the top level.
 - **`app/layout.tsx`** is the only owner of `<html>`/`<body>`. `app/[tenant]/`
   wraps content only.
+- **`app/globals.css`** owns the font stack. `--font-sans` and `--font-mono`
+  splice next/font's generated families in front of Tailwind's generics, and
+  `option` is given the stack by name. A `<select>`'s option list is drawn by the
+  browser in a popup outside the page's inheritance chain, so a family list that
+  ends at two `@font-face` names has nowhere to fall back to and the popup picks
+  the browser default — a serif on Windows. Everything else inherits, which is why
+  no individual control carries `font-sans`.
 - **`lib/roles.ts`** holds `ROLE_LABELS`, the assignable role list and the
   `canAdminister`/`canManage`/`canFrontDesk` predicates. It is framework-free so
   the sidebar, pages and Server Actions share one hierarchy; Postgres RLS is the
