@@ -15,6 +15,7 @@ import {
 
 const stripeMock = vi.hoisted(() => ({
   customersCreate: vi.fn(),
+  customersUpdate: vi.fn(),
   sessionsCreate: vi.fn(),
 }));
 
@@ -38,7 +39,10 @@ vi.mock("@/lib/site", () => ({
 
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
-    customers: { create: stripeMock.customersCreate },
+    customers: {
+      create: stripeMock.customersCreate,
+      update: stripeMock.customersUpdate,
+    },
     checkout: { sessions: { create: stripeMock.sessionsCreate } },
   }),
 }));
@@ -126,11 +130,13 @@ function signedOut() {
 describe("createCompanyAndCheckout", () => {
   beforeEach(() => {
     stripeMock.customersCreate.mockReset();
+    stripeMock.customersUpdate.mockReset();
     stripeMock.sessionsCreate.mockReset();
     plansMock.findSubscriptionPlan.mockReset();
     adminMock.createAdminClient.mockReset();
 
     stripeMock.customersCreate.mockResolvedValue({ id: "cus_new" });
+    stripeMock.customersUpdate.mockResolvedValue({ id: "cus_new" });
     stripeMock.sessionsCreate.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay_test",
     });
@@ -284,6 +290,31 @@ describe("createCompanyAndCheckout", () => {
           },
         ],
       ]);
+
+      // `openBillingPortal` proves the customer belongs to this workspace, so the
+      // id is stamped on the customer as soon as the row has an id to stamp.
+      expect(stripeMock.customersUpdate).toHaveBeenCalledWith("cus_new", {
+        metadata: { company_id: COMPANY_ID },
+      });
+    });
+
+    it("still onboards when the customer cannot be stamped", async () => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      useAdmin();
+      stripeMock.customersUpdate.mockRejectedValue(new Error("rate limited"));
+
+      const url = await captureRedirect(() =>
+        createCompanyAndCheckout(IDLE, onboardingForm()),
+      );
+
+      // The portal falls back to the slug every onboarding customer carries, so
+      // a cosmetic failure must not strand a workspace that is ready.
+      expect(url).toBe("https://checkout.stripe.com/c/pay_test");
+      expect(stripeMock.sessionsCreate).toHaveBeenCalledTimes(1);
+      expect(consoleError).toHaveBeenCalled();
+      consoleError.mockRestore();
     });
 
     it("bills the price the caller picked, not a configured default", async () => {

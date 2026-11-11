@@ -122,6 +122,22 @@ export async function createCompanyAndCheckout(
     }
     createdCompanyId = company.id;
 
+    // Stamp the company id on the customer now that it exists, so
+    // `openBillingPortal` can prove the customer belongs to this workspace
+    // instead of trusting the column it was reached through. Best effort: the
+    // portal falls back to the `company_slug` this customer was created with, so
+    // a hiccup at Stripe must not strand an onboarding that is otherwise ready.
+    try {
+      await stripe.customers.update(customer.id, {
+        metadata: { company_id: company.id },
+      });
+    } catch (error) {
+      console.error(
+        "Could not stamp the Stripe customer with its company:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+
     const { error: membershipError } = await admin
       .from("company_members")
       .insert({ company_id: company.id, user_id: user.id, role: "owner" });

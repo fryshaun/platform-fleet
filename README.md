@@ -832,6 +832,26 @@ which is request-scoped.
 - **Money is a non-negative integer in minor units.** `price_cents`,
   `compare_at_price_cents` and `product_dates.price_cents` are `integer` with
   `check (>= 0)`, and `currency` is a three-letter lowercase code.
+- **The billing columns belong to the webhook.** `subscription_status`,
+  `stripe_customer_id`, `stripe_subscription_id` and `trial_ends_at` are revoked
+  from `anon` and `authenticated` and granted back to `service_role` alone, and
+  `companies_guard_billing_columns()` refuses a signed-in session that tries to
+  move them. `companies_update_admin` is row-level only, so without that guard an
+  owner or admin could point their workspace at another customer's id — one
+  `openBillingPortal` would then open, and one
+  `reconcileCompanySubscription()` would launder into a trusted
+  `subscription_status`. The identity columns stay writable, because those are
+  the workspace, not the money: `(name, currency, badge, logo_url,
+  enabled_sections, require_mfa)`. Onboarding and checkout reach the billing
+  columns through the service role instead.
+- **A portal session proves the customer is yours.** `openBillingPortal` reads
+  the customer from Stripe before it opens a session and refuses one whose
+  `metadata.company_id` — or, for a customer created before that stamp existed,
+  `metadata.company_slug` — is not this workspace's. Onboarding stamps
+  `company_id` on the customer as soon as the company row has an id to carry it.
+- **A user's own row exposes the display name and the photo.** `profiles` grants
+  `(full_name, avatar_url)` and nothing else, so the address the team roster
+  renders cannot be rewritten by the user it belongs to.
 
 ### Headers
 
@@ -920,6 +940,14 @@ breaks every other project on the same port.
   the header (Vercel) that is sufficient. Serving Node directly from the internet
   needs a hostname allowlist on top — the deployment knows its own domains via
   `NEXT_PUBLIC_SITE_URL` and `VERCEL_*`, and this is the point to add it.
+- **Subscription state is not a paywall.** `hasLiveSubscription` decides which
+  billing buttons a page shows and nothing else: a workspace whose subscription
+  has lapsed keeps full read and write access to its data, and every section
+  switch keeps working. Making it a paywall means deciding what a lapsed
+  workspace may still see — a product decision, not a fix — and it has to be
+  enforced in Postgres like everything else, because the browser holds the
+  publishable key. Until then, "canceled" changes what you are billed, not what
+  you can reach.
 
 ## Architecture notes
 

@@ -34,6 +34,7 @@ const MIGRATION_FILES = [
   "20260101000400_account_avatars.sql",
   "20260101000500_company_identity.sql",
   "20260101000900_two_factor.sql",
+  "20260101001000_company_billing_guard.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -47,6 +48,9 @@ const assetsSql = readMigration("20260101000300_assets.sql");
 const avatarsSql = readMigration("20260101000400_account_avatars.sql");
 const identitySql = readMigration("20260101000500_company_identity.sql");
 const twoFactorSql = readMigration("20260101000900_two_factor.sql");
+const billingGuardSql = readMigration(
+  "20260101001000_company_billing_guard.sql",
+);
 const allSql = [
   accountsSql,
   invitationSql,
@@ -55,6 +59,7 @@ const allSql = [
   avatarsSql,
   identitySql,
   twoFactorSql,
+  billingGuardSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -936,6 +941,112 @@ describe("two-factor authentication", () => {
   it("is applied after the company table it extends", () => {
     expect(
       MIGRATION_FILES.indexOf("20260101000900_two_factor.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
+    );
+  });
+});
+
+describe("billing column guard", () => {
+  /**
+   * The columns only the billing webhook, the reconciler and onboarding write.
+   * A session that can move them can point the workspace at another customer.
+   */
+  const BILLING_COLUMNS = [
+    "subscription_status",
+    "stripe_customer_id",
+    "stripe_subscription_id",
+    "trial_ends_at",
+  ];
+
+  it("takes the table-wide update away and grants the identity columns back", () => {
+    // `companies_update_admin` is row-level only, so without this a session can
+    // rewrite every column of its own row.
+    expect(billingGuardSql).toContain(
+      "revoke update on public.companies from anon, authenticated;",
+    );
+    expect(billingGuardSql).toContain(
+      "grant update (name, currency, badge, logo_url, enabled_sections, require_mfa)",
+    );
+    expect(billingGuardSql).toContain("on public.companies to authenticated;");
+  });
+
+  it.each(BILLING_COLUMNS)("keeps %s out of every client grant", (column) => {
+    const grants = billingGuardSql.match(/^grant update \([^)]*\)[^;]*;/gm) ?? [];
+    expect(grants.length).toBeGreaterThan(0);
+    for (const grant of grants) {
+      expect(grant).not.toContain(column);
+    }
+  });
+
+  it("refuses the columns at the trigger, where a re-grant cannot undo it", () => {
+    // `before update of` lists the columns, so an update that names none of them
+    // never reaches the function.
+    const trigger = billingGuardSql.match(
+      /create trigger companies_guard_billing_columns[\s\S]*?;/,
+    )?.[0];
+    expect(trigger).toBeDefined();
+    expect(trigger).toContain("before update of");
+    for (const column of BILLING_COLUMNS) {
+      expect(trigger).toContain(column);
+    }
+    expect(billingGuardSql).toContain(
+      "create or replace function public.companies_guard_billing_columns()",
+    );
+    // 42501 is what PostgREST reports as a 403, so the client sees a refusal
+    // rather than a 500.
+    expect(billingGuardSql).toContain("using errcode = '42501'");
+    // `is distinct from`, so writing the same value back is not an error.
+    expect(billingGuardSql).toContain("is distinct from old.subscription_status");
+  });
+
+  it("lets the webhook through, so the guard never refuses its own writer", () => {
+    // The guard exists to close a row-level-only policy, not to fight the roles
+    // that already bypass RLS: `service_role` (webhook, reconciler, onboarding)
+    // and the owner's own SQL editor session.
+    expect(billingGuardSql).toContain(
+      "if current_user not in ('anon', 'authenticated')",
+    );
+  });
+
+  it("refuses the claim too, so a definer wrapper cannot launder a client write", () => {
+    // A `security definer` helper would run as its owner; the JWT claim is what
+    // still identifies the signed-in user behind it.
+    expect(billingGuardSql).toContain(
+      "and coalesce(auth.role(), '') not in ('anon', 'authenticated') then",
+    );
+  });
+
+  it("is a trigger-only function no client role can call", () => {
+    expect(billingGuardSql).toContain(
+      "revoke all on function public.companies_guard_billing_columns()",
+    );
+    expect(billingGuardSql).toContain("from public, anon, authenticated;");
+    expect(billingGuardSql).toContain(
+      "grant execute on function public.companies_guard_billing_columns() to service_role;",
+    );
+  });
+
+  it("drops the trigger before recreating it, so the file is re-runnable", () => {
+    expect(billingGuardSql).toContain(
+      "drop trigger if exists companies_guard_billing_columns on public.companies;",
+    );
+  });
+
+  it("takes the same columns off a user's own profile", () => {
+    // `email` is on the row the roster renders, so a session that can write it
+    // can appear as a colleague.
+    expect(billingGuardSql).toContain(
+      "revoke update on public.profiles from anon, authenticated;",
+    );
+    expect(billingGuardSql).toContain(
+      "grant update (full_name, avatar_url) on public.profiles to authenticated;",
+    );
+  });
+
+  it("is applied after the columns it protects exist", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001000_company_billing_guard.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
     );
