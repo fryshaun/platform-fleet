@@ -17,6 +17,16 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90",
         outline:
           "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        /**
+         * The brand fill, for the one status that should read as positive:
+         * bookable, available, active. Lime is a background only — the label is
+         * always Deep Forest on top.
+         */
+        brand:
+          "border-transparent bg-brand-lime text-brand-forest [a&]:hover:bg-brand-lime/90",
+        /** Confirmed states (subscribed, registered). Emerald with white. */
+        success:
+          "border-transparent bg-brand-emerald text-white [a&]:hover:bg-brand-emerald/90",
       },
     },
     defaultVariants: {

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { SignInCard } from "@/components/auth/sign-in-card";
+import { BrandLink } from "@/components/brand/brand-link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { readParam } from "@/lib/search-params";
 
@@ -12,10 +13,8 @@ export const metadata: Metadata = {
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
-    <main className="bg-muted/40 flex min-h-svh flex-col items-center justify-center gap-6 p-6">
-      <Link href="/" className="text-sm font-semibold tracking-tight">
-        Platform
-      </Link>
+    <main className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6">
+      <BrandLink logoClassName="text-xl" />
 
       <Suspense
         fallback={

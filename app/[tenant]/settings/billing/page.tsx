@@ -109,7 +109,7 @@ async function BillingContent({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             Subscription
-            <Badge variant={active ? "secondary" : "outline"}>
+            <Badge variant={active ? "success" : "outline"}>
               {company.subscription_status}
             </Badge>
           </CardTitle>

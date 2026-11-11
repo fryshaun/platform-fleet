@@ -228,7 +228,13 @@ function WorkspaceRow({ workspace }: { workspace: Workspace }) {
         {needsBilling ? (
           <Badge variant="outline">Billing needed</Badge>
         ) : (
-          <Badge variant="secondary">{workspace.subscriptionStatus}</Badge>
+          <Badge
+            variant={
+              workspace.subscriptionStatus === "active" ? "success" : "secondary"
+            }
+          >
+            {workspace.subscriptionStatus}
+          </Badge>
         )}
         <ArrowRightIcon aria-hidden="true" className="size-4" />
       </div>

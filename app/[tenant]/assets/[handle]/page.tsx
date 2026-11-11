@@ -105,9 +105,19 @@ async function AssetContent({
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6 lg:p-10">
       <PageHeader
         title={asset.name}
-        description={`/${asset.handle} · ${assetStatusLabel(asset.status)}${
-          asset.serial ? ` · ${asset.serial}` : ""
-        }`}
+        description={
+          <>
+            <span className="font-mono">/{asset.handle}</span>
+            {" · "}
+            {assetStatusLabel(asset.status)}
+            {asset.serial ? (
+              <>
+                {" · "}
+                <span className="font-mono">{asset.serial}</span>
+              </>
+            ) : null}
+          </>
+        }
         actions={
           <Button variant="outline" asChild>
             <Link href={`/${company.slug}/assets`}>All assets</Link>

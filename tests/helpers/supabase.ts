@@ -167,7 +167,7 @@ export function createSupabaseMock(
           totp: {
             qr_code: "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>",
             secret: "JBSWY3DPEHPK3PXP",
-            uri: "otpauth://totp/Platform:owner@example.com?secret=JBSWY3DPEHPK3PXP",
+            uri: "otpauth://totp/Trackstand:owner@example.com?secret=JBSWY3DPEHPK3PXP",
           },
         },
         error: null,

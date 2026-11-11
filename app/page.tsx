@@ -5,6 +5,8 @@ import {
   ShieldCheckIcon,
 } from "lucide-react";
 
+import { BrandBackdrop } from "@/components/brand/brand-backdrop";
+import { BrandLink } from "@/components/brand/brand-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 
@@ -28,12 +30,24 @@ const FEATURES = [
 
 export default function HomePage() {
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="border-border/60 flex items-center justify-between border-b px-6 py-4">
-        <span className="text-sm font-semibold tracking-tight">Platform</span>
-        <nav className="flex items-center gap-2">
+    <div className="relative isolate flex min-h-svh flex-col overflow-hidden">
+      <BrandBackdrop />
+
+      {/* The lime rule is the brand's signature edge, borrowed from the mark. */}
+      <div aria-hidden="true" className="bg-brand-lime h-[3px]" />
+
+      <header className="border-border/60 bg-background/80 flex items-center justify-between gap-3 border-b px-4 py-3 backdrop-blur sm:px-6">
+        <BrandLink logoClassName="text-lg sm:text-xl" />
+        <nav className="flex items-center gap-1 sm:gap-2">
           <ThemeToggle />
-          <Button variant="ghost" size="sm" asChild>
+          {/* Below `sm` the header keeps only the primary action; the sign-in
+              page is one tap away from "Get started" anyway. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="hidden sm:inline-flex"
+            asChild
+          >
             <Link href="/login">Sign in</Link>
           </Button>
           <Button size="sm" asChild>
@@ -44,11 +58,21 @@ export default function HomePage() {
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center gap-16 px-6 py-20">
         <section className="space-y-6">
-          <p className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
+          <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium tracking-wide uppercase">
+            <span
+              aria-hidden="true"
+              className="text-brand-emerald dark:text-brand-lime font-mono leading-none tracking-[-0.12em]"
+            >
+              {"///"}
+            </span>
             Multi-tenant starter
           </p>
           <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            The base every customer-facing app needs.
+            The base every{" "}
+            <span className="bg-brand-lime text-brand-forest box-decoration-clone px-1 sm:whitespace-nowrap">
+              customer-facing
+            </span>{" "}
+            app needs.
           </h1>
           <p className="text-muted-foreground max-w-xl text-lg leading-relaxed">
             Sign-in with email or Google, per-workspace membership and roles,
@@ -69,12 +93,12 @@ export default function HomePage() {
           {FEATURES.map((feature) => (
             <div
               key={feature.title}
-              className="border-border/60 rounded-xl border p-6"
+              className="border-border/60 bg-card rounded-xl border p-6"
             >
-              <feature.icon
-                aria-hidden="true"
-                className="text-muted-foreground mb-4 size-5"
-              />
+              {/* Lime tile, forest glyph: the one place the mark's fill shows up. */}
+              <span className="bg-brand-lime text-brand-forest mb-4 flex size-9 items-center justify-center rounded-md">
+                <feature.icon aria-hidden="true" className="size-5" />
+              </span>
               <h2 className="mb-2 text-sm font-semibold">{feature.title}</h2>
               <p className="text-muted-foreground text-sm leading-relaxed">
                 {feature.body}
@@ -83,6 +107,16 @@ export default function HomePage() {
           ))}
         </section>
       </main>
+
+      <footer className="border-border/60 border-t px-6 py-8">
+        <div className="text-muted-foreground mx-auto flex w-full max-w-5xl flex-col gap-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+          <BrandLink logoClassName="text-base" />
+          <p className="font-mono tracking-[0.14em] uppercase">
+            Fleet operations · Built for bike shops
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }
+

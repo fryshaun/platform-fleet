@@ -1,12 +1,12 @@
-# Platform
+# Trackstand
 
-A multi-tenant **base template** on Next.js 16 and Supabase: sign-in, per-workspace
-membership and roles, RLS-scoped data and Stripe billing, plus two worked domain
-modules — an optional **products** section with categories, variants, stock,
-date-based inventory and a media gallery, and an optional **assets** section that
-records the individual units behind a product. Switch either off and you are back
-to the bare base; copy them for the next section (see
-[Adding a new section](#adding-a-new-section)) and delete nothing.
+Trackstand is a multi-tenant **base template** on Next.js 16 and Supabase:
+sign-in, per-workspace membership and roles, RLS-scoped data and Stripe billing,
+plus two worked domain modules — an optional **products** section with
+categories, variants, stock, date-based inventory and a media gallery, and an
+optional **assets** section that records the individual units behind a product.
+Switch either off and you are back to the bare base; copy them for the next
+section (see [Adding a new section](#adding-a-new-section)) and delete nothing.
 
 Each company is a **tenant** addressed by a path segment: `/acme/dashboard`,
 `/acme/settings`. The tenant slug lives in Postgres, not in a hard-coded map, and
@@ -23,6 +23,53 @@ re-checked by every policy of the module it belongs to.
 | Auth        | Supabase Auth (password, magic link, Google OAuth) via `@supabase/ssr` |
 | Database    | Supabase Postgres with RLS                                            |
 | Billing     | Stripe Checkout + Billing Portal + webhook sync                        |
+
+## Brand
+
+The identity is code, not a checked-in mockup. `components/brand/logo.tsx` draws
+the mark and sets the wordmark live, so the lockup scales with the text around it
+and flips with the theme. `app/icon.svg` is the favicon built from the same
+geometry. The two JPEGs in `public/logos/` are for print and email, where a
+raster is what the medium expects.
+
+| Token           | Value      | Use                                                   |
+| --------------- | ---------- | ----------------------------------------------------- |
+| Trackstand Lime | `#B8F200`  | Primary actions, active nav, the top rule             |
+| Emerald Core    | `#15803D`  | Links on light, success, the dark-mode bar            |
+| Deep Forest     | `#0B2818`  | Text on light, and the ink the dark floor is cut from |
+| Night Trail     | `#122119`  | Panels in print and email                             |
+| Chalk White     | `#F6F7F4`  | Page floor in light                                   |
+| Pure Off-White  | `#FAFAF8`  | Light-mode panels, print and email text               |
+
+Dark mode sits one step below that palette, because a full page of Deep Forest
+reads mid-green rather than dark. The floor drops to `#06120C`, the rail to
+`#08160D`, cards and popovers to `#0D1F15`, and body text dims from Pure
+Off-White to `#DFE5DB` (14.9:1 on the floor, 13.4:1 on a card — dimmer, never
+lower contrast). Lime and emerald are unchanged; the darker ground is what lets
+lime clear 15:1 and carry links there.
+
+Three rules the tokens exist to enforce:
+
+- **Lime is never text.** `--primary` is lime with `--primary-foreground` Deep
+  Forest (13.8:1). A link needs its own colour, so `--link` is Emerald Core on
+  light and lime on dark, and `Button variant="link"` reads `text-link` rather
+  than `text-primary`.
+- **Three families, three jobs.** Plus Jakarta Sans (`font-display`) for the
+  wordmark and every heading, Inter (`font-sans`) for UI copy, JetBrains Mono
+  (`font-mono`) for handles, serials and other machine-readable strings.
+- **The mark is three bars, not an image.** `<TrackstandLogo className="text-xl" />`
+  sizes the mark at 1.11em of the wordmark's font size — the artwork's own ratio
+  — and `--logo-bar-center` lifts the centre bar from forest to emerald on dark
+  surfaces so it stays legible.
+- **The canvas carries the mark's gesture.** `BrandBackdrop` lays a 1px hatch at
+  the bars' own 69° lean over two radial pools (lime into the top corner,
+  emerald out of the bottom). It is CSS only — no image request, no animation —
+  and the hatch is radially masked so it fades before the reading zone.
+
+Use `BrandLink` for the brand link on any standalone page (landing, auth, 404),
+`BrandBackdrop` as the first child of a `relative isolate` marketing page, and
+`TrackstandStack` for an asset label that needs the mark, the wordmark and a
+serial.
 
 ## Getting started
 

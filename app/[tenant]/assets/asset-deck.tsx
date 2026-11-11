@@ -87,14 +87,14 @@ function AssetCard({
                 {asset.name}
               </Link>
             </h2>
-            <p className="text-muted-foreground truncate text-xs">
+            <p className="text-muted-foreground truncate font-mono text-xs">
               /{asset.handle}
             </p>
           </div>
           <AssetStatusBadge status={asset.status} />
         </div>
 
-        <p className="text-muted-foreground truncate text-xs">
+        <p className="text-muted-foreground truncate font-mono text-xs">
           {asset.serial ? `Serial ${asset.serial}` : "No serial number"}
         </p>
 

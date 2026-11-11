@@ -80,7 +80,7 @@ export function AssetsSection({
                 <Badge
                   variant={
                     asset.status === "available"
-                      ? "secondary"
+                      ? "brand"
                       : asset.status === "maintenance"
                         ? "destructive"
                         : "outline"

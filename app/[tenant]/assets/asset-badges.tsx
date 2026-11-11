@@ -19,7 +19,7 @@ export function AssetStatusBadge({ status }: { status: AssetStatus }) {
     <Badge
       variant={
         status === "available"
-          ? "secondary"
+          ? "brand"
           : status === "maintenance"
             ? "destructive"
             : "outline"
@@ -57,7 +57,7 @@ export function AssetAvailabilityBadge({
   asset: Pick<Asset, "status">;
 }) {
   return (
-    <Badge variant={isAssetAvailable(asset) ? "secondary" : "outline"}>
+    <Badge variant={isAssetAvailable(asset) ? "brand" : "outline"}>
       {isAssetAvailable(asset) ? "Bookable" : "Not bookable"}
     </Badge>
   );

@@ -6,7 +6,8 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  description: string;
+  /** Copy, or markup when part of the line needs its own styling (mono IDs). */
+  description: ReactNode;
   actions?: ReactNode;
 }) {
   return (

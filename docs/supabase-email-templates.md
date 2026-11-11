@@ -177,13 +177,18 @@ the shell because Supabase wants a complete document per template.
 
 ### Shell
 
+The palette is the light theme only — mail clients cannot be trusted to apply a
+dark one, and a forced inversion of lime-on-forest turns muddy. The lockup is the
+supplied raster `public/logos/trackstand-logo-light.jpg`, which is drawn on pure
+white and therefore sits invisibly on the white card.
+
 ```html
 <table
   role="presentation"
   width="100%"
   cellpadding="0"
   cellspacing="0"
-  style="background:#f4f4f5;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+  style="background:#f6f7f4;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
 >
   <tr>
     <td align="center">
@@ -192,25 +197,37 @@ the shell because Supabase wants a complete document per template.
         width="100%"
         cellpadding="0"
         cellspacing="0"
-        style="max-width:480px;background:#ffffff;border-radius:12px;padding:32px"
+        style="max-width:480px;background:#ffffff;border-radius:12px;overflow:hidden"
       >
+        <!-- the 3px lime rule from the identity guidelines -->
         <tr>
           <td
-            style="font-size:16px;font-weight:600;color:#18181b;padding-bottom:16px"
+            style="height:3px;line-height:3px;font-size:0;background:#b8f200"
           >
-            Platform
+            &nbsp;
           </td>
         </tr>
         <tr>
-          <td style="font-size:15px;line-height:24px;color:#3f3f46">
+          <td style="padding:32px 32px 20px">
+            <img
+              src="{{ .SiteURL }}/logos/trackstand-logo-light.jpg"
+              width="140"
+              height="28"
+              alt="Trackstand"
+              style="display:block;width:140px;height:auto;border:0;font-size:18px;font-weight:700;color:#0b2818"
+            />
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 32px;font-size:15px;line-height:24px;color:#0b2818">
             <!-- per-template body -->
           </td>
         </tr>
         <tr>
           <td
-            style="font-size:12px;line-height:18px;color:#a1a1aa;padding-top:24px;border-top:1px solid #e4e4e7"
+            style="padding:24px 32px;font-size:12px;line-height:18px;color:#4f6b5a;background:#fafaf8;border-top:1px solid #dfe5db"
           >
-            Platform — <a href="https://app.example.com" style="color:#71717a">app.example.com</a>
+            Trackstand — <a href="https://app.example.com" style="color:#15803d">app.example.com</a>
           </td>
         </tr>
       </table>
@@ -221,23 +238,28 @@ the shell because Supabase wants a complete document per template.
 
 ### Button and link fallback
 
+Lime is a background, never a text colour: the label is Deep Forest on Trackstand
+Lime (13.8:1). Outline styles are avoided because Outlook drops `border-radius`
+and a square lime block is the cleaner failure.
+
 ```html
 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0">
   <tr>
-    <td style="border-radius:8px;background:#18181b">
+    <td style="border-radius:8px;background:#b8f200">
       <a
         href="LINK"
-        style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px"
+        style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#0b2818;text-decoration:none;border-radius:8px"
         >BUTTON LABEL</a
       >
     </td>
   </tr>
 </table>
-<p style="font-size:13px;line-height:20px;color:#71717a;margin:0">
+<p style="font-size:13px;line-height:20px;color:#4f6b5a;margin:0">
   If the button does not work, paste this into your browser:<br />
-  <span style="word-break:break-all">LINK</span>
+  <span style="word-break:break-all;color:#15803d">LINK</span>
 </p>
 ```
+
 
 ### Confirm signup — body
 
@@ -257,7 +279,7 @@ the shell because Supabase wants a complete document per template.
 
 ```html
 <p style="margin:0 0 8px">
-  Use the button below, or the code, to sign in to Platform.
+  Use the button below, or the code, to sign in to Trackstand.
 </p>
 <!-- button + fallback; LINK = the magic-link href above -->
 <p style="margin:24px 0 8px;font-size:15px;color:#3f3f46">Your code:</p>
@@ -278,7 +300,7 @@ the shell because Supabase wants a complete document per template.
 <p style="margin:0 0 8px">
   {{ if index .Data "company_name" }}<strong>{{ index .Data "company_name" }}</strong>
   has invited you{{ else }}You have been invited{{ end }} to join their
-  workspace on Platform.
+  workspace on Trackstand.
 </p>
 <p style="margin:0 0 8px">
   Accepting adds you to their team with the role they chose.
@@ -310,7 +332,7 @@ the shell because Supabase wants a complete document per template.
 ```html
 <p style="margin:0 0 8px">
   Confirm that <strong>{{ .NewEmail }}</strong> should become the address for
-  your Platform account.
+  your Trackstand account.
 </p>
 <!-- button + fallback; LINK = the email-change href above -->
 <p style="font-size:13px;color:#71717a;margin:24px 0 0">
