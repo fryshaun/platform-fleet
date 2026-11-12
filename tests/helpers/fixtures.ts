@@ -153,6 +153,45 @@ export function lineItemRow(
   };
 }
 
+/** An extra in the fixture workspace, for the extras tests. */
+export const ADDON_ID = "77777777-7777-4777-8777-777777777777";
+
+export function addonRow(
+  overrides: Partial<Tables<"addons">> = {},
+): Tables<"addons"> {
+  return {
+    id: ADDON_ID,
+    company_id: COMPANY_ID,
+    name: "Helmet",
+    handle: "helmet",
+    description: null,
+    price_cents: 500,
+    price_kind: "per_booking",
+    max_quantity: 1,
+    status: "active",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** One extra taken by a line. The price is the snapshot, not the catalogue's. */
+export function lineAddonRow(
+  overrides: Partial<Tables<"booking_line_addons">> = {},
+): Tables<"booking_line_addons"> {
+  return {
+    id: "88888888-8888-4888-8888-888888888888",
+    company_id: COMPANY_ID,
+    line_item_id: LINE_ITEM_ID,
+    addon_id: ADDON_ID,
+    quantity: 1,
+    unit_price_cents: 500,
+    price_kind: "per_booking",
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 /**
  * A plan as the catalogue hands it to the checkout actions.
  *

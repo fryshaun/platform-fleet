@@ -65,6 +65,25 @@ export type BookingStatus =
 /** Who took the booking: somebody at the desk, or a renter client. */
 export type BookingChannel = "staff" | "api";
 
+/**
+ * How a catalogue extra is charged.
+ *
+ * `per_booking` charges once however long the hire runs; `per_day` multiplies by
+ * the booking window. The pair is copied onto every `booking_line_addons` row
+ * when the extra is taken, so a later change of offer cannot re-price a hire
+ * somebody already agreed to.
+ */
+export type AddonPriceKind = "per_booking" | "per_day";
+
+/**
+ * Whether an extra is on offer.
+ *
+ * `archived` hides it from the picker without touching the bookings that took
+ * it — a used extra cannot be deleted, so archiving is the verb the catalogue
+ * page offers.
+ */
+export type AddonStatus = "active" | "archived";
+
 export type Database = {
   public: {
     Tables: {
@@ -566,6 +585,115 @@ export type Database = {
         };
         Relationships: [];
       };
+      /**
+       * The extras catalogue (migration 15). Belongs to the bookings section, not
+       * to products: it is the desk's offer list.
+       */
+      addons: {
+        Row: {
+          id: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          description: string | null;
+          price_cents: number;
+          price_kind: AddonPriceKind;
+          max_quantity: number;
+          status: AddonStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          description?: string | null;
+          price_cents?: number;
+          price_kind?: AddonPriceKind;
+          max_quantity?: number;
+          status?: AddonStatus;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          name?: string;
+          handle?: string;
+          description?: string | null;
+          price_cents?: number;
+          price_kind?: AddonPriceKind;
+          max_quantity?: number;
+          status?: AddonStatus;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * Which products an extra is offered with. **No rows means every product**,
+       * which is what lets a workspace without the products section use the
+       * catalogue at all.
+       */
+      addon_products: {
+        Row: {
+          company_id: string;
+          addon_id: string;
+          product_id: string;
+          created_at: string;
+        };
+        Insert: {
+          company_id: string;
+          addon_id: string;
+          product_id: string;
+          created_at?: string;
+        };
+        Update: {
+          company_id?: string;
+          addon_id?: string;
+          product_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * The extras a booking took, anchored on the line rather than on the
+       * booking — deliberately no `booking_id`.
+       */
+      booking_line_addons: {
+        Row: {
+          id: string;
+          company_id: string;
+          line_item_id: string;
+          addon_id: string;
+          quantity: number;
+          unit_price_cents: number;
+          price_kind: AddonPriceKind;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          line_item_id: string;
+          addon_id: string;
+          quantity?: number;
+          unit_price_cents?: number;
+          price_kind?: AddonPriceKind;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          line_item_id?: string;
+          addon_id?: string;
+          quantity?: number;
+          unit_price_cents?: number;
+          price_kind?: AddonPriceKind;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       /**
@@ -653,6 +781,15 @@ export type Database = {
         Args: { target_status: BookingStatus };
         Returns: boolean;
       };
+      /**
+       * Replaces an extra's product scope in one transaction (migration 15). An
+       * empty array clears it, which the schema reads as "every product" — the
+       * reason the delete and the inserts must not be separable.
+       */
+      set_addon_products: {
+        Args: { target_addon_id: string; product_ids?: string[] };
+        Returns: number;
+      };
     };
     Enums: {
       member_role: MemberRole;
@@ -663,6 +800,8 @@ export type Database = {
       asset_status: AssetStatus;
       booking_status: BookingStatus;
       booking_channel: BookingChannel;
+      addon_price_kind: AddonPriceKind;
+      addon_status: AddonStatus;
     };
     CompositeTypes: { [_ in never]: never };
   };

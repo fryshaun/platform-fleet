@@ -17,6 +17,12 @@ import {
 } from "@/components/ui/card";
 import { deleteBooking, setBookingStatus } from "@/lib/actions/bookings";
 import {
+  bookingAddonsTotal,
+  type Addon,
+  type AddonProduct,
+  type BookingLineAddon,
+} from "@/lib/addons";
+import {
   BOOKING_STATUS_LABELS,
   bookingTotals,
   formatBookingPrice,
@@ -111,7 +117,7 @@ async function BookingContent({
   const products = isSectionEnabled(company, "products")
     ? ((await supabase
         .from("products")
-        .select("id, title")
+        .select("id, title, parent_id")
         .eq("company_id", company.id)
         .order("title", { ascending: true })).data ?? [])
     : [];
@@ -129,6 +135,38 @@ async function BookingContent({
   const canRemove = canManage(role) && writable;
   const moves = nextBookingStatuses(booking.status);
   const totals = bookingTotals(lines);
+
+  // The extras are read in the same request as the lines: a booking page that
+  // showed its money without them would under-quote the hire.
+  const lineIds = lines.map((line) => line.id);
+  const [addonsResult, addonScopeResult, lineAddonsResult] = await Promise.all([
+    supabase
+      .from("addons")
+      .select("*")
+      .eq("company_id", company.id)
+      .order("name", { ascending: true }),
+    supabase
+      .from("addon_products")
+      .select("company_id, addon_id, product_id, created_at")
+      .eq("company_id", company.id),
+    lineIds.length === 0
+      ? Promise.resolve({ data: [] as BookingLineAddon[] })
+      : supabase
+          .from("booking_line_addons")
+          .select("*")
+          .eq("company_id", company.id)
+          .in("line_item_id", lineIds),
+  ]);
+
+  const addons: Addon[] = addonsResult.data ?? [];
+  const addonScope: AddonProduct[] = addonScopeResult.data ?? [];
+  const lineAddons: BookingLineAddon[] = lineAddonsResult.data ?? [];
+  const extrasCents = bookingAddonsTotal(
+    lineAddons,
+    booking.starts_on,
+    booking.ends_on,
+  );
+
   const renter = customers.find(
     (customer) => customer.id === booking.customer_id,
   );
@@ -141,7 +179,7 @@ async function BookingContent({
           <>
             {renter?.full_name ?? "Renter"} ·{" "}
             {formatBookingWindow(booking.starts_on, booking.ends_on)} ·{" "}
-            {formatBookingPrice(totals.totalCents, booking.currency)}
+            {formatBookingPrice(totals.totalCents + extrasCents, booking.currency)}
           </>
         }
         actions={
@@ -216,6 +254,9 @@ async function BookingContent({
         customers={customers}
         products={products}
         assets={assets}
+        addons={addons}
+        addonScope={addonScope}
+        lineAddons={lineAddons}
         canEdit={canEdit}
       />
 

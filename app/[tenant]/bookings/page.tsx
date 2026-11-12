@@ -159,23 +159,28 @@ async function BookingsContent({
         title="Bookings"
         description="Every reservation, the renter it is for and the units it holds."
         actions={
-          canEdit ? (
-            <FormSheet
-              triggerLabel="New booking"
-              title="Take a booking"
-              description="Pick a renter or record a walk-in, then choose the days the unit is out."
-              formId={NEW_BOOKING_FORM_ID}
-              submitLabel="Take booking"
-            >
-              <BookingFields
-                slug={company.slug}
-                customers={customers}
-                layout="panel"
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/${company.slug}/bookings/add-ons`}>Extras</Link>
+            </Button>
+            {canEdit ? (
+              <FormSheet
+                triggerLabel="New booking"
+                title="Take a booking"
+                description="Pick a renter or record a walk-in, then choose the days the unit is out."
                 formId={NEW_BOOKING_FORM_ID}
-                showSubmit={false}
-              />
-            </FormSheet>
-          ) : undefined
+                submitLabel="Take booking"
+              >
+                <BookingFields
+                  slug={company.slug}
+                  customers={customers}
+                  layout="panel"
+                  formId={NEW_BOOKING_FORM_ID}
+                  showSubmit={false}
+                />
+              </FormSheet>
+            ) : null}
+          </div>
         }
       />
 

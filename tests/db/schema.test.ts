@@ -44,6 +44,8 @@ const MIGRATION_FILES = [
   "20260101001200_renters.sql",
   "20260101001300_bookings.sql",
   "20260101001400_bookings_write_gate.sql",
+  "20260101001500_catalog_addons.sql",
+  "20260101001600_addons_write_gate.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -66,14 +68,18 @@ const subscriptionGateSql = readMigration(
 const rentersSql = readMigration("20260101001200_renters.sql");
 const bookingsSql = readMigration("20260101001300_bookings.sql");
 const bookingsGateSql = readMigration("20260101001400_bookings_write_gate.sql");
+const addonsSql = readMigration("20260101001500_catalog_addons.sql");
+const addonsGateSql = readMigration("20260101001600_addons_write_gate.sql");
 
 /**
- * The write gate is two files, not one: a policy cannot name a table that does
- * not exist yet, so migration 14 states the same rule for the tables migration
- * 13 adds. The policy names are unique across both, which is what lets the gate
- * assertions below read one string.
+ * The write gate is more than one file: a policy cannot name a table that does
+ * not exist yet, so migrations 14 and 16 state the same rule for the tables
+ * migrations 13 and 15 add. The policy names are unique across them, which is
+ * what lets the gate assertions below read one string.
  */
-const allGateSql = [subscriptionGateSql, bookingsGateSql].join("\n");
+const allGateSql = [subscriptionGateSql, bookingsGateSql, addonsGateSql].join(
+  "\n",
+);
 
 const allSql = [
   accountsSql,
@@ -88,6 +94,8 @@ const allSql = [
   rentersSql,
   bookingsSql,
   bookingsGateSql,
+  addonsSql,
+  addonsGateSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -133,11 +141,23 @@ const BOOKING_TABLES = [
   "booking_line_items",
 ] as const satisfies readonly TableName[];
 
+/**
+ * The extras (migration 15). Listed apart from the booking book because they are
+ * a catalogue of their own — and because their policies ask about the *bookings*
+ * section, which is the detail a reader would otherwise guess wrong.
+ */
+const ADDON_TABLES = [
+  "addons",
+  "addon_products",
+  "booking_line_addons",
+] as const satisfies readonly TableName[];
+
 const MODULE_TABLES = [
   ...PRODUCT_TABLES,
   ...ASSET_TABLES,
   ...RENTER_TABLES,
   ...BOOKING_TABLES,
+  ...ADDON_TABLES,
 ] as const;
 
 /**
@@ -1489,6 +1509,9 @@ describe("the subscription write gate", () => {
     "rider_preferences",
     "bookings",
     "booking_line_items",
+    "addons",
+    "addon_products",
+    "booking_line_addons",
   ] as const;
 
   const CARVED_OUT = ["companies", "profiles", "company_members"] as const;
@@ -1715,3 +1738,130 @@ describe("the session writes fit inside the column grants", () => {
     );
   });
 });
+
+describe("extras", () => {
+  /** One policy, from `create policy` to the semicolon that ends it. */
+  function policyFor(begin: string): string {
+    return addonsSql.match(new RegExp(`${begin}[\\s\\S]*?;`))?.[0] ?? "";
+  }
+
+  it("anchors an extra on the line, and never on the booking", () => {
+    // The booking is reached through the line. A second column would let a row
+    // claim a booking its line does not belong to, and the money column on the
+    // board reads the line.
+    const table = addonsSql.match(
+      /create table if not exists public\.booking_line_addons \([\s\S]*?\n\);/,
+    )?.[0];
+
+    expect(table).toBeDefined();
+    expect(table).toContain("line_item_id uuid not null");
+    expect(table).not.toContain("booking_id");
+  });
+
+  it("asks about the bookings section, not the products section", () => {
+    // The catalogue is the desk's offer list. Scoping it to `products` would
+    // hide the extras from every workspace that rents without a catalogue.
+    for (const policy of [
+      policyFor('create policy "addons_select_member"'),
+      policyFor('create policy "addons_insert_manager"'),
+      policyFor('create policy "addon_products_select_member"'),
+      policyFor('create policy "addon_products_insert_manager"'),
+      policyFor('create policy "booking_line_addons_select_member"'),
+      policyFor('create policy "booking_line_addons_insert_frontdesk"'),
+    ]) {
+      expect(policy).toContain("public.has_company_section(company_id, 'bookings')");
+      expect(policy).not.toContain("'products'");
+    }
+  });
+
+  it("snapshots the price on insert only", () => {
+    // The copy is what makes a catalogue price an offer rather than a promise
+    // about the past: the update branch re-imposes the stored values instead.
+    expect(addonsSql).toContain(
+      "create or replace function public.booking_line_addons_snapshot()",
+    );
+    // `TG_OP` is uppercase in PL/pgSQL, and a lowercase comparison is the
+    // mistake this assertion exists to catch: the insert branch never runs, the
+    // price is never copied and the scope is never checked.
+    expect(addonsSql).toMatch(
+      /if tg_op = 'INSERT' then[\s\S]{0,400}new\.unit_price_cents := catalogue_price;/,
+    );
+    expect(addonsSql).toMatch(
+      /if tg_op = 'UPDATE' then[\s\S]{0,900}new\.unit_price_cents := old\.unit_price_cents;/,
+    );
+    expect(addonsSql).not.toMatch(/tg_op = 'insert'/);
+  });
+
+  it("treats an unscoped extra as offered with everything", () => {
+    // `not exists (scope rows)` is the whole of that rule, in the trigger and in
+    // `isAddonOfferedFor`. Losing it hides every extra from every line.
+    expect(addonsSql).toMatch(
+      /if exists \(\s*select 1 from public\.addon_products ap[\s\S]{0,500}and not exists \(/,
+    );
+    expect(addonsSql).toContain("ap.product_id in (line_product, parent_product)");
+  });
+
+  it("refuses a product change under a line that carries extras", () => {
+    expect(addonsSql).toContain(
+      "create or replace function public.booking_line_items_product_guard()",
+    );
+    expect(addonsSql).toContain(
+      "before update of product_id on public.booking_line_items",
+    );
+    // An edit form always sends the product, so the trigger must compare before
+    // it refuses — otherwise every save of a line with extras fails.
+    expect(addonsSql).toContain(
+      "if new.product_id is not distinct from old.product_id then",
+    );
+  });
+
+  it("replaces a scope in one statement, as a definer", () => {
+    // Two client writes could fail between each other and leave the extra
+    // unscoped, which the schema reads as "every product".
+    expect(addonsSql).toContain(
+      "create or replace function public.set_addon_products(",
+    );
+    expect(addonsSql).toContain("security definer");
+    expect(addonsSql).toContain("set search_path = ''");
+    expect(addonsSql).toContain(
+      "revoke all on function public.set_addon_products(uuid, uuid[]) from public, anon;",
+    );
+    expect(addonsSql).toContain(
+      "grant execute on function public.set_addon_products(uuid, uuid[]) to authenticated, service_role;",
+    );
+  });
+
+  it("gives the extras a composite key to point at", () => {
+    // `booking_line_items` had no `unique (company_id, id)` before migration 15,
+    // and without it the foreign key below could not exist.
+    expect(addonsSql).toContain(
+      "add constraint booking_line_items_company_id_unique",
+    );
+    expect(addonsSql).toContain(
+      "references public.booking_line_items (company_id, id)",
+    );
+    expect(addonsSql).toContain("on delete cascade");
+  });
+
+  it("keeps trigger-only functions away from every client role", () => {
+    for (const fn of [
+      "public.booking_line_addons_snapshot()",
+      "public.booking_line_items_product_guard()",
+    ]) {
+      expect(addonsSql).toContain(
+        `revoke all on function ${fn} from public, anon, authenticated;`,
+      );
+    }
+  });
+
+  it("is gated after the tables it gates", () => {
+    // Same reason as Guard 5 for the booking book: a policy cannot name a table
+    // that does not exist yet.
+    expect(
+      MIGRATION_FILES.indexOf("20260101001600_addons_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001500_catalog_addons.sql"),
+    );
+  });
+});
+

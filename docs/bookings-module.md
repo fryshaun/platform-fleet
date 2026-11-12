@@ -85,10 +85,17 @@ disagree with the constraint.
 ## Not in this slice
 
 `app/api/v1/**`, `api_clients`, `customer_access_tokens`, `api_rate_limits`,
-`bookings.idempotency_key`; catalog add-ons; asset components, usage logs and
-service state; the `asset_status` enum change; a full `/renters` directory (the
-booking form creates a renter inline instead); deposits and Stripe payment for a
-booking; renter email.
+`bookings.idempotency_key`; a full `/renters` directory (the booking form creates
+a renter inline instead); deposits and Stripe payment for a booking; renter email.
+
+Catalog add-ons, asset components, usage logs and service state, and the
+`asset_status` enum change are **no longer out of scope** — they have their own
+sheet in `docs/extras-and-components.md`, with extras hanging off a line rather
+than off the booking. One rule from that sheet belongs here, because it is about
+this slice's money: **a booking-wide charge — delivery, setup, a waiver for the
+whole hire — is an ordinary product line**, not an extras row and not a new
+column. A simple ecommerce product with no `parent_id` is added as a line, which
+keeps one shape for money on a booking.
 
 ## Order of work
 
