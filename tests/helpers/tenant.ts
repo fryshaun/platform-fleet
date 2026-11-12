@@ -6,6 +6,7 @@ import { companyRow } from "./fixtures";
 import {
   createSupabaseMock,
   signedInUser,
+  type DbResult,
   type StorageBucketOverrides,
   type SupabaseMock,
   type TableHandler,
@@ -26,6 +27,13 @@ export type TenantSetupOptions = {
   subscription?: SubscriptionStatus;
   /** Bucket method overrides, keyed by bucket id. */
   storage?: Record<string, StorageBucketOverrides>;
+  /**
+   * `supabase.rpc()` overrides, keyed by function name.
+   *
+   * `assignAsset` asks `check_asset_availability()` before it writes, so the
+   * bookings tests have to be able to say what the advisory answer is.
+   */
+  rpc?: Record<string, (args?: unknown) => DbResult>;
 };
 
 /**
@@ -44,6 +52,7 @@ export function tenantSetup(
   const mock = createSupabaseMock({
     auth: { getUser: vi.fn(async () => signedInUser()) },
     storage: options.storage,
+    rpc: options.rpc,
     tables: {
       companies: () => ({
         data: companyRow({

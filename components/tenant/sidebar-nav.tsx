@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BoxesIcon,
+  CalendarCheckIcon,
   LayoutDashboardIcon,
   PackageIcon,
   TagsIcon,
@@ -22,6 +23,7 @@ const NAV_ICONS = {
   dashboard: LayoutDashboardIcon,
   products: PackageIcon,
   assets: BoxesIcon,
+  bookings: CalendarCheckIcon,
   categories: TagsIcon,
 } as const;
 

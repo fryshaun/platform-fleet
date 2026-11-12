@@ -22,7 +22,7 @@ import type { Tables } from "@/lib/supabase/types";
  * `has_company_section` in SQL, because RLS — not this file — has the last word.
  */
 
-export const SECTION_KEYS = ["products", "assets"] as const;
+export const SECTION_KEYS = ["products", "assets", "bookings"] as const;
 
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
@@ -54,6 +54,13 @@ export const SECTIONS: Record<SectionKey, SectionDefinition> = {
     path: "assets",
     description:
       "The individual units behind a product — kept by staff, hidden from customers.",
+  },
+  bookings: {
+    key: "bookings",
+    label: "Bookings",
+    path: "bookings",
+    description:
+      "Renters, reservations and the availability calendar behind them.",
   },
 };
 
