@@ -1,5 +1,5 @@
 import type { SubscriptionPlan } from "@/lib/plans";
-import type { Tables } from "@/lib/supabase/types";
+import type { Tables, Views } from "@/lib/supabase/types";
 
 /**
  * Row-shaped fixtures.
@@ -271,6 +271,32 @@ export function serviceEventRow(
     serviced_on: "2026-02-01",
     notes: null,
     created_at: "2026-02-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/**
+ * A row of the derived service view, as `component_service_status` returns it.
+ *
+ * The intervals arrive coalesced to 0 (the view does that), so a fixture leaves
+ * two of them at 0 unless a test is about the third.
+ */
+export function serviceStatusRow(
+  overrides: Partial<Views<"component_service_status">> = {},
+): Views<"component_service_status"> {
+  return {
+    company_id: COMPANY_ID,
+    component_id: COMPONENT_ID,
+    asset_id: ASSET_ID,
+    name: "Fox 36",
+    interval_days: 0,
+    interval_km: 0,
+    interval_hours: 50,
+    counted_from: "2026-01-02",
+    days_since: 30,
+    hours_since: 42,
+    km_since: 120,
+    status: "due_soon",
     ...overrides,
   };
 }
