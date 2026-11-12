@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import type {
   AssetStatus,
+  BookingChannel,
+  BookingStatus,
   Database,
   MemberRole,
   ProductKind,
@@ -38,6 +40,9 @@ const MIGRATION_FILES = [
   "20260101000900_two_factor.sql",
   "20260101001000_company_billing_guard.sql",
   "20260101001100_subscription_write_gate.sql",
+  "20260101001200_renters.sql",
+  "20260101001300_bookings.sql",
+  "20260101001400_bookings_write_gate.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -57,6 +62,18 @@ const billingGuardSql = readMigration(
 const subscriptionGateSql = readMigration(
   "20260101001100_subscription_write_gate.sql",
 );
+const rentersSql = readMigration("20260101001200_renters.sql");
+const bookingsSql = readMigration("20260101001300_bookings.sql");
+const bookingsGateSql = readMigration("20260101001400_bookings_write_gate.sql");
+
+/**
+ * The write gate is two files, not one: a policy cannot name a table that does
+ * not exist yet, so migration 14 states the same rule for the tables migration
+ * 13 adds. The policy names are unique across both, which is what lets the gate
+ * assertions below read one string.
+ */
+const allGateSql = [subscriptionGateSql, bookingsGateSql].join("\n");
+
 const allSql = [
   accountsSql,
   invitationSql,
@@ -67,6 +84,9 @@ const allSql = [
   twoFactorSql,
   billingGuardSql,
   subscriptionGateSql,
+  rentersSql,
+  bookingsSql,
+  bookingsGateSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -100,7 +120,24 @@ const PRODUCT_TABLES = [
  * section on never reads a row of it. */
 const ASSET_TABLES = ["assets"] as const satisfies readonly TableName[];
 
-const MODULE_TABLES = [...PRODUCT_TABLES, ...ASSET_TABLES] as const;
+/** The renters module: the people a booking is for, not the staff who take it. */
+const RENTER_TABLES = [
+  "customers",
+  "rider_preferences",
+] as const satisfies readonly TableName[];
+
+/** The booking book itself. */
+const BOOKING_TABLES = [
+  "bookings",
+  "booking_line_items",
+] as const satisfies readonly TableName[];
+
+const MODULE_TABLES = [
+  ...PRODUCT_TABLES,
+  ...ASSET_TABLES,
+  ...RENTER_TABLES,
+  ...BOOKING_TABLES,
+] as const;
 
 /**
  * Every table the application expects to exist.
@@ -672,6 +709,311 @@ describe("assets section", () => {
   });
 });
 
+describe("renters", () => {
+  it("keeps a renter apart from an account", () => {
+    // `profiles` is the staff/auth table. A renter usually has no account, so
+    // the link is optional — and deleting that account must not delete the
+    // person the shop still has a booking for.
+    expect(rentersSql).toContain(
+      "profile_id uuid references public.profiles (id) on delete set null",
+    );
+    expect(rentersSql).not.toMatch(/profile_id uuid not null/);
+  });
+
+  it("keys the renter on the tenant", () => {
+    expect(rentersSql).toContain("unique (company_id, handle)");
+    // The target of `booking_line_items`' composite key, and of its `rider_id`.
+    expect(rentersSql).toContain("unique (company_id, id)");
+    expect(rentersSql).toContain("foreign key (company_id, customer_id)");
+  });
+
+  it("gives a renter at most one set of measurements", () => {
+    // The renter is the key, not a separate id: one rider, one row.
+    expect(rentersSql).toContain("customer_id uuid primary key");
+    expect(rentersSql).toContain("on delete cascade");
+    expect(rentersSql).toContain("disciplines text[] not null default '{}'");
+  });
+
+  it("keeps one address per renter inside a workspace", () => {
+    // Case-insensitive like `assets_serial_idx`, partial because a walk-in may
+    // give only a name and a phone number.
+    expect(rentersSql).toContain(
+      "create unique index if not exists customers_email_idx",
+    );
+    expect(rentersSql).toContain("lower(email)");
+    expect(rentersSql).toMatch(/where email is not null;/);
+  });
+
+  it("asks the bookings switch in every policy it declares", () => {
+    const policies = rentersSql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies).toHaveLength(8);
+    for (const policy of policies) {
+      expect(policy).toContain(
+        "public.has_company_section(company_id, 'bookings')",
+      );
+    }
+  });
+
+  it("never asks about another section's switch", () => {
+    expect(rentersSql).not.toContain("'products'");
+    expect(rentersSql).not.toContain("'assets'");
+  });
+
+  it("lets the front desk record a walk-in and the manager remove one", () => {
+    for (const table of RENTER_TABLES) {
+      for (const command of ["insert", "update"] as const) {
+        const body = rentersSql.match(
+          new RegExp(`create policy "${table}_${command}_frontdesk"[\\s\\S]*?;`),
+        )?.[0];
+
+        expect({ table, command, declared: Boolean(body) }).toEqual({
+          table,
+          command,
+          declared: true,
+        });
+        expect(body).toContain("'staff'");
+      }
+
+      const removal = rentersSql.match(
+        new RegExp(`create policy "${table}_delete_manager"[\\s\\S]*?;`),
+      )?.[0];
+
+      expect(removal).toContain("array['owner', 'admin', 'manager']");
+      expect(removal).not.toContain("'staff'");
+    }
+  });
+
+  it("gives readers the member predicate", () => {
+    for (const table of RENTER_TABLES) {
+      const select = rentersSql.match(
+        new RegExp(`create policy "${table}_select_member"[\\s\\S]*?;`),
+      )?.[0];
+
+      expect(select).toContain("public.is_company_member(company_id)");
+    }
+  });
+
+  it("enables RLS on the tables it adds", () => {
+    for (const table of RENTER_TABLES) {
+      expect(rentersSql).toContain(
+        `alter table public.${table} enable row level security;`,
+      );
+    }
+  });
+
+  it("is applied after the modules it builds on", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001200_renters.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101000300_assets.sql"),
+    );
+  });
+});
+
+describe("bookings section", () => {
+  it("asks the section predicate in every policy it declares", () => {
+    const policies = bookingsSql.match(/create policy[\s\S]*?;/g) ?? [];
+
+    expect(policies).toHaveLength(8);
+    for (const policy of policies) {
+      expect(policy).toContain(
+        "public.has_company_section(company_id, 'bookings')",
+      );
+    }
+  });
+
+  it("never asks about another section's switch", () => {
+    // The book may point at a product and a unit, but it does not depend on
+    // either section being switched on: a shop can rent out what it has without
+    // a catalogue.
+    expect(bookingsSql).not.toContain("'products'");
+    expect(bookingsSql).not.toContain("'assets'");
+  });
+
+  it("installs the operator class the constraint needs", () => {
+    // `=` on a uuid inside a GiST index is `btree_gist`'s contribution.
+    expect(bookingsSql).toContain("create extension if not exists btree_gist");
+  });
+
+  it("guards the overlap where the single unit is", () => {
+    // A `uuid[]` on `bookings` cannot take a GiST `&&`, so the constraint sits
+    // on the line that names one asset.
+    expect(bookingsSql).toContain("exclude using gist");
+    expect(bookingsSql).toContain("company_id with =");
+    expect(bookingsSql).toContain("asset_id with =");
+    expect(bookingsSql).toContain("daterange(starts_on, ends_on, '[)') with &&");
+    expect(bookingsSql).toContain(
+      "where (asset_id is not null and blocks_stock)",
+    );
+  });
+
+  it("reads half-open windows everywhere", () => {
+    // The constraint, the advisory check and `lib/bookings.ts` all use `[)`.
+    // `ends_on > starts_on` is then the only date rule a booking needs.
+    expect(bookingsSql).toContain(
+      "constraint bookings_window check (ends_on > starts_on)",
+    );
+    expect(bookingsSql).toContain(
+      "constraint booking_line_items_window check (ends_on > starts_on)",
+    );
+    expect(
+      bookingsSql.match(/daterange\([^)]*starts_on, [^)]*ends_on, '\[\)'\)/g),
+    ).toHaveLength(3);
+  });
+
+  it("copies the window and the flag from the booking, never the client", () => {
+    expect(bookingsSql).toContain(
+      "create or replace function public.booking_line_items_sync()",
+    );
+    expect(bookingsSql).toContain("new.starts_on := parent_starts_on;");
+    expect(bookingsSql).toContain(
+      "new.blocks_stock := public.booking_blocks_stock(parent_status);",
+    );
+    expect(bookingsSql).toContain(
+      "before insert or update on public.booking_line_items",
+    );
+  });
+
+  it("drags the lines with the booking", () => {
+    expect(bookingsSql).toContain(
+      "create or replace function public.bookings_propagate_dates()",
+    );
+    expect(bookingsSql).toContain(
+      "after update of starts_on, ends_on, status on public.bookings",
+    );
+    // A no-op update of the booking must not touch every line in the book.
+    expect(bookingsSql).toContain(
+      "if new.starts_on is not distinct from old.starts_on",
+    );
+  });
+
+  it("releases a cancelled booking without deleting its history", () => {
+    expect(bookingsSql).toContain(
+      "select target_status in ('pending', 'confirmed', 'out');",
+    );
+    expect(bookingsSql).toContain("blocks_stock boolean not null default true");
+  });
+
+  it("stores no availability of its own", () => {
+    // The whole module is derived: a booking reserves a unit by existing, and
+    // nothing here copies a number or a status onto another table.
+    expect(bookingsSql).not.toMatch(/^\s*inventory_quantity/m);
+    expect(bookingsSql).not.toMatch(/update public\.(products|assets)/i);
+  });
+
+  it("exposes availability through an invoker view", () => {
+    expect(bookingsSql).toContain(
+      "create or replace view public.asset_availability",
+    );
+    // Without this a view runs as its owner and would hand one workspace
+    // another's calendar.
+    expect(bookingsSql).toContain("with (security_invoker = true)");
+    expect(bookingsSql).toContain("where l.asset_id is not null");
+    expect(bookingsSql).toContain("and l.blocks_stock;");
+    expect(bookingsSql).toContain(
+      "revoke all on public.asset_availability from anon;",
+    );
+  });
+
+  it("keys every line on the booking, the product, the unit and the rider", () => {
+    for (const target of ["bookings", "products", "assets", "customers"]) {
+      expect(bookingsSql).toContain(
+        `references public.${target} (company_id, id)`,
+      );
+    }
+    expect(bookingsSql).toContain("unique (company_id, id)");
+  });
+
+  it("keeps a renter with history undeletable", () => {
+    // A booking is the reason the renter row exists; `restrict` says so, and the
+    // manager-facing action turns the refusal into a sentence.
+    expect(bookingsSql).toMatch(
+      /foreign key \(company_id, customer_id\)[\s\S]*?on delete restrict/,
+    );
+  });
+
+  it("answers the advisory check as a definer with an empty search_path", () => {
+    expect(bookingsSql).toContain(
+      "create or replace function public.check_asset_availability(",
+    );
+    expect(bookingsSql).toContain("set search_path = ''");
+    expect(bookingsSql).toContain("stable");
+    // `0` means free; the constraint, not this, is the guarantee.
+    expect(bookingsSql).toContain("select count(*)::integer");
+  });
+
+  it("revokes every new helper from the anonymous role", () => {
+    for (const signature of [
+      "public.booking_blocks_stock(public.booking_status)",
+      "public.check_asset_availability(uuid, uuid, date, date)",
+    ]) {
+      expect(bookingsSql).toContain(
+        `revoke all on function ${signature} from public, anon;`,
+      );
+      expect(bookingsSql).toContain(
+        `grant execute on function ${signature} to authenticated, service_role;`,
+      );
+    }
+
+    for (const signature of [
+      "public.booking_line_items_sync()",
+      "public.bookings_propagate_dates()",
+    ]) {
+      // Trigger-only, like `assets_stamp_status_change`.
+      expect(bookingsSql).toContain(
+        `revoke all on function ${signature} from public, anon, authenticated;`,
+      );
+      expect(bookingsSql).toContain(
+        `grant execute on function ${signature} to service_role;`,
+      );
+    }
+  });
+
+  it("enables RLS on the tables it adds", () => {
+    for (const table of BOOKING_TABLES) {
+      expect(bookingsSql).toContain(
+        `alter table public.${table} enable row level security;`,
+      );
+    }
+  });
+
+  it("gives the front desk the book and the manager its removal", () => {
+    for (const command of ["insert", "update"] as const) {
+      const body = bookingsSql.match(
+        new RegExp(`create policy "bookings_${command}_frontdesk"[\\s\\S]*?;`),
+      )?.[0];
+
+      expect(body).toContain("'staff'");
+    }
+
+    const removal = bookingsSql.match(
+      /create policy "bookings_delete_manager"[\s\S]*?;/,
+    )?.[0];
+
+    expect(removal).toContain("array['owner', 'admin', 'manager']");
+    expect(removal).not.toContain("'staff'");
+  });
+
+  it("is applied after the renters it points at", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001300_bookings.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001200_renters.sql"),
+    );
+  });
+
+  it("states its write gate after the tables it names", () => {
+    // A policy cannot be created before its table, which is why Guard 5 is a
+    // migration of its own rather than a block in migration 11.
+    expect(
+      MIGRATION_FILES.indexOf("20260101001400_bookings_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001300_bookings.sql"),
+    );
+  });
+});
+
 describe("account avatars", () => {
   it("declares the bucket the uploader writes to, with the same limits", () => {
     // `lib/account.ts` repeats the size ceiling and the MIME list; these
@@ -877,6 +1219,23 @@ describe("enum values", () => {
       "maintenance",
       "retired",
     ] satisfies AssetStatus[]);
+  });
+
+  it("matches booking_status", () => {
+    expect(enumValues(bookingsSql, "booking_status")).toEqual([
+      "pending",
+      "confirmed",
+      "out",
+      "returned",
+      "cancelled",
+    ] satisfies BookingStatus[]);
+  });
+
+  it("matches booking_channel", () => {
+    expect(enumValues(bookingsSql, "booking_channel")).toEqual([
+      "staff",
+      "api",
+    ] satisfies BookingChannel[]);
   });
 });
 
@@ -1100,9 +1459,12 @@ describe("the rows a session may not write at all", () => {
 
 describe("the subscription write gate", () => {
   /**
-   * The five tables a subscription pays for. `companies`, `profiles` and
+   * The tables a subscription pays for. `companies`, `profiles` and
    * `company_members` are deliberately absent: they are how a lapsed workspace
    * fixes its card, its team and its own account, and how it leaves.
+   *
+   * The booking tables arrive after migration 11, so their policies live in
+   * migration 14 — `allGateSql` reads both files.
    */
   const GATED_TABLES = [
     "products",
@@ -1110,13 +1472,17 @@ describe("the subscription write gate", () => {
     "product_media",
     "product_dates",
     "assets",
+    "customers",
+    "rider_preferences",
+    "bookings",
+    "booking_line_items",
   ] as const;
 
   const CARVED_OUT = ["companies", "profiles", "company_members"] as const;
 
   /** One policy, from `create policy` to the semicolon that ends it. */
   function policyFor(begin: string): string | undefined {
-    return subscriptionGateSql.match(new RegExp(`${begin}[\\s\\S]*?;`))?.[0];
+    return allGateSql.match(new RegExp(`${begin}[\\s\\S]*?;`))?.[0];
   }
 
   /** The members of an enum, read out of its `create type` statement. */
@@ -1200,9 +1566,9 @@ describe("the subscription write gate", () => {
   );
 
   it("leaves reads alone, so a lapsed workspace still shows its data", () => {
-    expect(subscriptionGateSql).not.toContain("as restrictive for select");
+    expect(allGateSql).not.toContain("as restrictive for select");
     // Not `for all` either: that form's `using` clause filters reads too.
-    expect(subscriptionGateSql).not.toContain("as restrictive for all");
+    expect(allGateSql).not.toContain("as restrictive for all");
   });
 
   it("keeps the tables a workspace repairs itself with out of the gate", () => {

@@ -47,6 +47,24 @@ export type ProductMediaKind = "image" | "video";
  */
 export type AssetStatus = "available" | "maintenance" | "retired";
 
+/**
+ * Where one reservation stands.
+ *
+ * `pending`, `confirmed` and `out` still hold the units on their lines;
+ * `returned` and `cancelled` release them while keeping the record. The list is
+ * complete on creation, like the other ladders, and `BLOCKING_BOOKING_STATUSES`
+ * in `lib/bookings.ts` names the holding half so the UI and the SQL agree.
+ */
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "out"
+  | "returned"
+  | "cancelled";
+
+/** Who took the booking: somebody at the desk, or a renter client. */
+export type BookingChannel = "staff" | "api";
+
 export type Database = {
   public: {
     Tables: {
@@ -374,8 +392,202 @@ export type Database = {
         };
         Relationships: [];
       };
+      customers: {
+        Row: {
+          id: string;
+          company_id: string;
+          profile_id: string | null;
+          handle: string;
+          full_name: string;
+          email: string | null;
+          phone: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          profile_id?: string | null;
+          handle: string;
+          full_name: string;
+          email?: string | null;
+          phone?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          profile_id?: string | null;
+          handle?: string;
+          full_name?: string;
+          email?: string | null;
+          phone?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      rider_preferences: {
+        Row: {
+          customer_id: string;
+          company_id: string;
+          height_cm: number | null;
+          weight_kg: number | null;
+          inseam_cm: number | null;
+          riding_level: string | null;
+          disciplines: string[];
+          notes: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          customer_id: string;
+          company_id: string;
+          height_cm?: number | null;
+          weight_kg?: number | null;
+          inseam_cm?: number | null;
+          riding_level?: string | null;
+          disciplines?: string[];
+          notes?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          customer_id?: string;
+          company_id?: string;
+          height_cm?: number | null;
+          weight_kg?: number | null;
+          inseam_cm?: number | null;
+          riding_level?: string | null;
+          disciplines?: string[];
+          notes?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      bookings: {
+        Row: {
+          id: string;
+          company_id: string;
+          reference: string;
+          customer_id: string;
+          status: BookingStatus;
+          channel: BookingChannel;
+          starts_on: string;
+          ends_on: string;
+          currency: string;
+          notes: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          reference: string;
+          customer_id: string;
+          status?: BookingStatus;
+          channel?: BookingChannel;
+          starts_on: string;
+          ends_on: string;
+          currency?: string;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          reference?: string;
+          customer_id?: string;
+          status?: BookingStatus;
+          channel?: BookingChannel;
+          starts_on?: string;
+          ends_on?: string;
+          currency?: string;
+          notes?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      booking_line_items: {
+        Row: {
+          id: string;
+          company_id: string;
+          booking_id: string;
+          product_id: string | null;
+          asset_id: string | null;
+          rider_id: string | null;
+          quantity: number;
+          unit_price_cents: number;
+          starts_on: string;
+          ends_on: string;
+          blocks_stock: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          booking_id: string;
+          product_id?: string | null;
+          asset_id?: string | null;
+          rider_id?: string | null;
+          quantity?: number;
+          unit_price_cents?: number;
+          starts_on?: string;
+          ends_on?: string;
+          blocks_stock?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          booking_id?: string;
+          product_id?: string | null;
+          asset_id?: string | null;
+          rider_id?: string | null;
+          quantity?: number;
+          unit_price_cents?: number;
+          starts_on?: string;
+          ends_on?: string;
+          blocks_stock?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
-    Views: { [_ in never]: never };
+    Views: {
+      /**
+       * What is out, and when — read from `booking_line_items` (migration 13).
+       *
+       * The view is `security_invoker = true`, so RLS on the table underneath
+       * applies to whoever reads it. `period` is a `daterange`; PostgREST renders
+       * it as its canonical string form, e.g. `[2026-03-01,2026-03-05)`.
+       */
+      asset_availability: {
+        Row: {
+          company_id: string;
+          asset_id: string | null;
+          booking_id: string;
+          line_item_id: string;
+          starts_on: string;
+          ends_on: string;
+          period: string;
+        };
+        Relationships: [];
+      };
+    };
     Functions: {
       is_company_member: {
         Args: { target_company_id: string };
@@ -424,6 +636,23 @@ export type Database = {
         Args: { object_name: string };
         Returns: string | null;
       };
+      /**
+       * How many blocking lines overlap the window. Advisory: the exclusion
+       * constraint on `booking_line_items` is what actually refuses a clash.
+       */
+      check_asset_availability: {
+        Args: {
+          target_company_id: string;
+          target_asset_id: string;
+          from_date: string;
+          to_date: string;
+        };
+        Returns: number;
+      };
+      booking_blocks_stock: {
+        Args: { target_status: BookingStatus };
+        Returns: boolean;
+      };
     };
     Enums: {
       member_role: MemberRole;
@@ -432,6 +661,8 @@ export type Database = {
       product_kind: ProductKind;
       product_media_kind: ProductMediaKind;
       asset_status: AssetStatus;
+      booking_status: BookingStatus;
+      booking_channel: BookingChannel;
     };
     CompositeTypes: { [_ in never]: never };
   };

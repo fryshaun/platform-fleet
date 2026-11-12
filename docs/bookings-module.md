@@ -62,7 +62,8 @@ disagree with the constraint.
 
 ## In this slice
 
-- Migrations 12 and 13, plus Guard 5 in `20260101001100_subscription_write_gate.sql`.
+- Migrations 12, 13 and 14 (Guard 5), the last because a policy cannot name a
+  table that does not exist yet.
 - `lib/supabase/types.ts`: `BookingStatus`, `BookingChannel`, four tables,
   `check_asset_availability`, and the first real entry in `Views`.
 - `lib/bookings.ts` — client-safe: statuses and labels, the transition table,
@@ -105,8 +106,10 @@ Each step ends green before the next starts.
    creation; `bookings`; `booking_line_items` with the constraint above;
    `booking_line_items_sync` and `bookings_propagate_dates`; and
    `asset_availability` as a view with `security_invoker = true`.
-3. **Guard 5** in the write gate, and the four tables added to `GATED_TABLES`
-   in the schema test. A lapsed workspace must not take new reservations.
+3. **Guard 5** in `20260101001400_bookings_write_gate.sql` — its own migration,
+   because migration 11 runs before the tables exist — and the four tables added
+   to `GATED_TABLES` in the schema test. A lapsed workspace must not take new
+   reservations.
 4. **`lib/supabase/types.ts`.**
 5. **`lib/bookings.ts`**, then `tests/unit/bookings.test.ts`.
 6. **`lib/actions/bookings.ts`**, then `tests/actions/bookings.test.ts`.
@@ -130,9 +133,10 @@ Each step ends green before the next starts.
   → write → `revalidatePath` → `redirectWith`, exactly like
   `lib/actions/assets.ts`.
 - Composite foreign keys everywhere a row names another tenant's row:
-  `(company_id, booking_id) → bookings (id, company_id)`, and the same for
-  `customer_id`, `asset_id`, `rider_id`. Each target needs `unique (id,
-  company_id)`.
+  `(company_id, booking_id) → bookings (company_id, id)`, and the same for
+  `customer_id`, `asset_id`, `rider_id`. Each target needs `unique (company_id,
+  id)` — the columns in that order, or the positional match compares the wrong
+  pair.
 - Cross-tenant assignment must be impossible at the database level, not only in
   the action.
 - Availability is read, never stored: no booking write touches
