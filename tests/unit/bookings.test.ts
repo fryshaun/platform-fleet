@@ -32,6 +32,7 @@ import {
 
 import {
   ASSET_ID,
+  COMPONENT_ID,
   CUSTOMER_ID,
   PRODUCT_ID,
   formDataOf,
@@ -352,6 +353,7 @@ describe("parseLineItemDraft", () => {
       draft: {
         product_id: null,
         asset_id: null,
+        component_id: null,
         quantity: 1,
         unit_price_cents: 0,
       },
@@ -372,8 +374,26 @@ describe("parseLineItemDraft", () => {
       draft: {
         product_id: PRODUCT_ID,
         asset_id: ASSET_ID,
+        component_id: null,
         quantity: 2,
         unit_price_cents: 4500,
+      },
+    });
+  });
+
+  it("reads the part a line books instead of a unit", () => {
+    // Migration 20: a line may hold one part — a spare wheel for the bike above.
+    expect(
+      parseLineItemDraft(
+        formDataOf({ quantity: "1", component_id: COMPONENT_ID }),
+      ),
+    ).toEqual({
+      draft: {
+        product_id: null,
+        asset_id: null,
+        component_id: COMPONENT_ID,
+        quantity: 1,
+        unit_price_cents: 0,
       },
     });
   });
@@ -403,6 +423,7 @@ describe("parseLineItemDraft", () => {
       draft: {
         product_id: null,
         asset_id: null,
+        component_id: null,
         quantity: 1,
         unit_price_cents: 0,
       },

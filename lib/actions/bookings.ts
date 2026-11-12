@@ -541,6 +541,44 @@ export async function assignAsset(formData: FormData) {
   });
 }
 
+/**
+ * Books a single part on a line, or clears it with an empty value.
+ *
+ * A part is not capacity: two bookings may promise the same spare wheel, and the
+ * schema says so — the exclusion constraint is on `asset_id`, not here. This is
+ * therefore a naming write, like the rider, not a reservation.
+ */
+export async function assignComponent(formData: FormData) {
+  const slug = readField(formData, "slug");
+  const context = await getActionContext(slug);
+  requireFrontDesk(context, slug);
+  requireSection(context, slug, "bookings");
+  requireWritableWorkspace(context, slug, "bookings");
+
+  const lineItemId = readField(formData, "line_item_id");
+  const back = bookingPath(formData);
+  if (!lineItemId) {
+    redirectWith(slug, back, { error: "Choose a line first." });
+  }
+
+  const componentId = readField(formData, "component_id");
+
+  const { error } = await context.supabase
+    .from("booking_line_items")
+    .update({ component_id: componentId || null })
+    .eq("id", lineItemId)
+    .eq("company_id", context.company.id);
+
+  if (error) {
+    redirectWith(slug, back, { error: writeErrorMessage(error) });
+  }
+
+  revalidateBookings(slug);
+  redirectWith(slug, back, {
+    ok: componentId ? "Part assigned." : "Part released.",
+  });
+}
+
 /** Names the person actually riding a line, or clears it with an empty value. */
 export async function assignRider(formData: FormData) {
   const slug = readField(formData, "slug");

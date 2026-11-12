@@ -130,6 +130,16 @@ async function BookingContent({
         .order("name", { ascending: true })).data ?? [])
     : [];
 
+  // Parts are read with the units, and only when the fleet section is on: a line
+  // may book a part instead of a whole unit (migration 20).
+  const components = isSectionEnabled(company, "assets")
+    ? ((await supabase
+        .from("asset_components")
+        .select("id, name, serial, asset_id")
+        .eq("company_id", company.id)
+        .order("name", { ascending: true })).data ?? [])
+    : [];
+
   const writable = isWorkspaceWritable(company.subscription_status);
   const canEdit = canFrontDesk(role) && writable;
   const canRemove = canManage(role) && writable;
@@ -254,6 +264,7 @@ async function BookingContent({
         customers={customers}
         products={products}
         assets={assets}
+        components={components}
         addons={addons}
         addonScope={addonScope}
         lineAddons={lineAddons}

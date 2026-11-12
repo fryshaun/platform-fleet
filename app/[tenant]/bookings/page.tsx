@@ -9,6 +9,7 @@ import { FormMessage } from "@/components/form-message";
 import { FormSheet } from "@/components/tenant/form-sheet";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
+import { bookingAddonsTotal, type BookingLineAddon } from "@/lib/addons";
 import { getTenantContext } from "@/lib/auth";
 import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import {
@@ -118,25 +119,59 @@ async function BookingsContent({
   const bookings: Booking[] = bookingsResult.data ?? [];
   const customers = customersResult.data ?? [];
 
-  // What each booking is worth, read from its lines rather than stored.
+  // What each booking is worth, read from its lines and their extras rather than
+  // stored. The extras are part of the quote — a hire with a helmet and a spare
+  // wheel is worth more than its lines alone — so the board's figure has to agree
+  // with the one on the booking page, which adds the same amounts.
   const bookingIds = bookings.map((booking) => booking.id);
   const lines: Pick<
     BookingLineItem,
-    "booking_id" | "quantity" | "unit_price_cents"
+    "id" | "booking_id" | "quantity" | "unit_price_cents"
   >[] =
     bookingIds.length > 0
       ? ((await supabase
           .from("booking_line_items")
-          .select("booking_id, quantity, unit_price_cents")
+          .select("id, booking_id, quantity, unit_price_cents")
           .in("booking_id", bookingIds)).data ?? [])
       : [];
 
+  const lineIds = lines.map((line) => line.id);
+  const lineAddons: BookingLineAddon[] =
+    lineIds.length > 0
+      ? ((await supabase
+          .from("booking_line_addons")
+          .select("*")
+          .eq("company_id", company.id)
+          .in("line_item_id", lineIds)).data ?? [])
+      : [];
+
+  // Which booking a line belongs to, so an extra can be filed under its booking
+  // without a second pass over the lines for every card.
+  const bookingByLine = new Map(
+    lines.map((line) => [line.id, line.booking_id]),
+  );
+
+  const extrasByBooking = new Map<string, BookingLineAddon[]>();
+  for (const row of lineAddons) {
+    const bookingId = bookingByLine.get(row.line_item_id);
+    if (!bookingId) continue;
+    const group = extrasByBooking.get(bookingId);
+    if (group) group.push(row);
+    else extrasByBooking.set(bookingId, [row]);
+  }
+
   const totals = new Map<string, number>();
   for (const booking of bookings) {
+    const bookingLines = lines.filter((line) => line.booking_id === booking.id);
+    const extrasCents = bookingAddonsTotal(
+      extrasByBooking.get(booking.id) ?? [],
+      booking.starts_on,
+      booking.ends_on,
+    );
+
     totals.set(
       booking.id,
-      bookingTotals(lines.filter((line) => line.booking_id === booking.id))
-        .totalCents,
+      bookingTotals(bookingLines).totalCents + extrasCents,
     );
   }
 

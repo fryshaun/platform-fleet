@@ -446,6 +446,12 @@ export function parseBookingDraft(
 export type LineItemDraft = {
   product_id: string | null;
   asset_id: string | null;
+  /**
+   * A single part, when the line books one rather than a whole unit — a spare
+   * wheel for the bike on the line above it. Migration 20 made this a column;
+   * nothing about it changes the window or the price.
+   */
+  component_id: string | null;
   quantity: number;
   unit_price_cents: number;
 };
@@ -481,6 +487,7 @@ export function parseLineItemDraft(
     draft: {
       product_id: field(formData, "product_id") || null,
       asset_id: field(formData, "asset_id") || null,
+      component_id: field(formData, "component_id") || null,
       quantity,
       unit_price_cents: unitPriceCents,
     },

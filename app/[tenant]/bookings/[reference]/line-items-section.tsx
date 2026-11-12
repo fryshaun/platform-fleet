@@ -37,6 +37,10 @@ import type { Tables } from "@/lib/supabase/types";
 
 import { SELECT_CLASSES } from "../../fields";
 import { AssignAssetForm, type AssignableAsset } from "./assign-asset-form";
+import {
+  AssignComponentForm,
+  type AssignableComponent,
+} from "./assign-component-form";
 
 /**
  * The minimum a product needs to be offered in the picker.
@@ -63,6 +67,7 @@ export function LineItemsSection({
   customers,
   products,
   assets,
+  components,
   addons,
   addonScope,
   lineAddons,
@@ -74,6 +79,8 @@ export function LineItemsSection({
   customers: Pick<Customer, "id" | "full_name" | "email">[];
   products: LineProduct[];
   assets: AssignableAsset[];
+  /** The parts a line may book instead of a whole unit. */
+  components: AssignableComponent[];
   addons: Addon[];
   addonScope: AddonProduct[];
   lineAddons: BookingLineAddon[];
@@ -118,6 +125,7 @@ export function LineItemsSection({
                   customers={customers}
                   products={products}
                   assets={assets}
+                  components={components}
                   currency={booking.currency}
                   days={days}
                   addons={addons}
@@ -216,6 +224,7 @@ function LineRow({
   customers,
   products,
   assets,
+  components,
   currency,
   days,
   addons,
@@ -229,6 +238,8 @@ function LineRow({
   customers: Pick<Customer, "id" | "full_name" | "email">[];
   products: LineProduct[];
   assets: AssignableAsset[];
+  /** The parts a line may book instead of a whole unit. */
+  components: AssignableComponent[];
   currency: string;
   /** Length of the hire, for the extras charged per day. */
   days: number;
@@ -242,6 +253,7 @@ function LineRow({
 }) {
   const product = products.find((row) => row.id === line.product_id);
   const asset = assets.find((row) => row.id === line.asset_id);
+  const component = components.find((row) => row.id === line.component_id);
   const rider = customers.find((row) => row.id === line.rider_id);
 
   return (
@@ -256,6 +268,7 @@ function LineRow({
             {formatBookingPrice(line.unit_price_cents, currency)} ={" "}
             {formatBookingPrice(lineItemTotal(line), currency)}
             {asset ? ` · ${asset.name}` : " · not allocated"}
+            {component ? ` · part ${component.name}` : ""}
             {rider ? ` · rider ${rider.full_name}` : ""}
           </p>
         </div>
@@ -381,6 +394,14 @@ function LineRow({
             lineItemId={line.id}
             assetId={line.asset_id}
             assets={assets}
+          />
+
+          <AssignComponentForm
+            slug={slug}
+            reference={reference}
+            lineItemId={line.id}
+            componentId={line.component_id}
+            components={components}
           />
 
           <form action={assignRider} className="flex items-end gap-2">

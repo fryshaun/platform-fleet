@@ -8,6 +8,7 @@ import {
   ASSET_ID,
   BOOKING_ID,
   COMPANY_ID,
+  COMPONENT_ID,
   CUSTOMER_ID,
   LINE_ITEM_ID,
   formDataOf,
@@ -46,6 +47,7 @@ vi.mock("@/lib/supabase/server", () => ({
 const {
   addLineItem,
   assignAsset,
+  assignComponent,
   assignRider,
   createBooking,
   deleteBooking,
@@ -450,6 +452,7 @@ describe("addLineItem", () => {
       booking_id: BOOKING_ID,
       product_id: LINE.product_id,
       asset_id: null,
+      component_id: null,
       quantity: 2,
       unit_price_cents: 4500,
     });
@@ -509,6 +512,7 @@ describe("updateLineItem", () => {
     expect(mock.argFor("booking_line_items", "update")).toEqual({
       product_id: null,
       asset_id: null,
+      component_id: null,
       quantity: 3,
       unit_price_cents: 2000,
     });
@@ -707,6 +711,75 @@ describe("assignRider", () => {
       [{ rider_id: null }],
     ]);
     expect(redirectParams(url).get("ok")).toBe("Rider cleared.");
+  });
+});
+
+describe("assignComponent", () => {
+  it("names a part and clears one with an empty value", async () => {
+    const mock = setup();
+
+    await captureRedirect(() =>
+      assignComponent(
+        formDataOf({
+          ...BOOKING,
+          line_item_id: LINE_ITEM_ID,
+          component_id: COMPONENT_ID,
+        }),
+      ),
+    );
+
+    expect(mock.argFor("booking_line_items", "update")).toEqual({
+      component_id: COMPONENT_ID,
+    });
+
+    const url = await captureRedirect(() =>
+      assignComponent(
+        formDataOf({
+          ...BOOKING,
+          line_item_id: LINE_ITEM_ID,
+          component_id: "",
+        }),
+      ),
+    );
+
+    expect(mock.argsFor("booking_line_items", "update")).toEqual([
+      [{ component_id: COMPONENT_ID }],
+      [{ component_id: null }],
+    ]);
+    expect(redirectParams(url).get("ok")).toBe("Part released.");
+    // A part is not capacity: the exclusion constraint is on `asset_id`, so this
+    // write only names one.
+    expect(mock.rpcCalls).toEqual([]);
+  });
+
+  it("asks for a line first", async () => {
+    setup();
+
+    const url = await captureRedirect(() =>
+      assignComponent(
+        formDataOf({ ...BOOKING, component_id: COMPONENT_ID }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe("Choose a line first.");
+  });
+
+  it("keeps a viewer out", async () => {
+    setup("member");
+
+    const url = await captureRedirect(() =>
+      assignComponent(
+        formDataOf({
+          ...BOOKING,
+          line_item_id: LINE_ITEM_ID,
+          component_id: COMPONENT_ID,
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
   });
 });
 
