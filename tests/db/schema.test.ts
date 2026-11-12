@@ -16,6 +16,7 @@ import type {
 } from "@/lib/supabase/types";
 
 import { WRITABLE_STATUSES } from "@/lib/billing/entitlements";
+import { BLOCKING_BOOKING_STATUSES } from "@/lib/bookings";
 
 /**
  * Static guards over the SQL migrations.
@@ -893,6 +894,18 @@ describe("bookings section", () => {
       "select target_status in ('pending', 'confirmed', 'out');",
     );
     expect(bookingsSql).toContain("blocks_stock boolean not null default true");
+  });
+
+  it("holds the same statuses lib/bookings.ts calls blocking", () => {
+    // The drift that would hurt: a status the UI treats as released while the
+    // constraint still holds the unit, or the other way round. Same shape as the
+    // write-gate check against `WRITABLE_STATUSES`.
+    const list = bookingsSql.match(/target_status in \(([^)]*)\)/)?.[1] ?? "";
+    const statuses = [...list.matchAll(/'([a-z_]+)'/g)].map(
+      (match) => match[1],
+    );
+
+    expect(statuses).toEqual([...BLOCKING_BOOKING_STATUSES]);
   });
 
   it("stores no availability of its own", () => {

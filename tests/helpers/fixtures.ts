@@ -87,6 +87,72 @@ export function assetRow(
   };
 }
 
+/** A renter in the fixture workspace, for the bookings section's tests. */
+export const CUSTOMER_ID = "44444444-4444-4444-8444-444444444444";
+
+export function customerRow(
+  overrides: Partial<Tables<"customers">> = {},
+): Tables<"customers"> {
+  return {
+    id: CUSTOMER_ID,
+    company_id: COMPANY_ID,
+    profile_id: null,
+    handle: "nadia-okafor",
+    full_name: "Nadia Okafor",
+    email: "nadia@example.com",
+    phone: "+1 555 0100",
+    notes: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A reservation in the fixture workspace, for the bookings section's tests. */
+export const BOOKING_ID = "55555555-5555-4555-8555-555555555555";
+export const LINE_ITEM_ID = "66666666-6666-4666-8666-666666666666";
+
+export function bookingRow(
+  overrides: Partial<Tables<"bookings">> = {},
+): Tables<"bookings"> {
+  return {
+    id: BOOKING_ID,
+    company_id: COMPANY_ID,
+    reference: "BK-7F3K2Q",
+    customer_id: CUSTOMER_ID,
+    status: "pending",
+    channel: "staff",
+    starts_on: "2026-03-04",
+    ends_on: "2026-03-08",
+    currency: "usd",
+    notes: null,
+    created_by: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+export function lineItemRow(
+  overrides: Partial<Tables<"booking_line_items">> = {},
+): Tables<"booking_line_items"> {
+  return {
+    id: LINE_ITEM_ID,
+    company_id: COMPANY_ID,
+    booking_id: BOOKING_ID,
+    product_id: PRODUCT_ID,
+    asset_id: null,
+    rider_id: null,
+    quantity: 1,
+    unit_price_cents: 4500,
+    starts_on: "2026-03-04",
+    ends_on: "2026-03-08",
+    blocks_stock: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 /**
  * A plan as the catalogue hands it to the checkout actions.
  *
