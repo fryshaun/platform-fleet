@@ -411,6 +411,86 @@ export type Database = {
         };
         Relationships: [];
       };
+      /**
+       * What kinds of part this workspace recognises (migration 18): Fork, Rear
+       * shock, Wheelset. Flat and company-scoped, like `product_categories`.
+       */
+      component_kinds: {
+        Row: {
+          id: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          name: string;
+          handle: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          name?: string;
+          handle?: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * The parts themselves. `asset_id` null is a part in the bin; `removed_on`
+       * null is a part fitted now.
+       */
+      asset_components: {
+        Row: {
+          id: string;
+          company_id: string;
+          kind_id: string | null;
+          asset_id: string | null;
+          name: string;
+          serial: string | null;
+          fitted_on: string;
+          removed_on: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          kind_id?: string | null;
+          asset_id?: string | null;
+          name: string;
+          serial?: string | null;
+          fitted_on?: string;
+          removed_on?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          kind_id?: string | null;
+          asset_id?: string | null;
+          name?: string;
+          serial?: string | null;
+          fitted_on?: string;
+          removed_on?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customers: {
         Row: {
           id: string;

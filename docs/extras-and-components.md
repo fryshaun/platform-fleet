@@ -133,12 +133,35 @@ Stages 1 and 2. Later stages are under *Not yet* and land in their own commits.
 - Tests: the `add-on stock` block in `tests/db/schema.test.ts` and the stock
   block in `tests/unit/addons.test.ts`.
 
+**Stage 3 — components and their taxonomy**
+
+- Migration 18: `component_kinds` (company-scoped, flat, like
+  `product_categories`) and `asset_components` (name, serial, nullable
+  `kind_id`, nullable `asset_id`, half-open `[fitted_on, removed_on)`), the
+  partial unique index that allows one fitted part of a kind per unit, and the
+  RLS policies on the **assets** section.
+- Migration 19: Guard 5 for both tables.
+- `lib/components.ts` — client-safe: kind handle/name rules,
+  `parseComponentKindDraft`, `componentNameProblem`, `componentSerialProblem`,
+  `fittedWindowProblem`, `isFitted`, `componentWhereLabel`,
+  `componentsForAsset`, `parseComponentDraft`.
+- `lib/actions/asset-components.ts` — `createComponentKind`,
+  `updateComponentKind`, `deleteComponentKind`, `createComponent`,
+  `updateComponent`, `removeComponent`, `deleteComponent`.
+- Tests: the `components` block in `tests/db/schema.test.ts`,
+  `tests/unit/components.test.ts`, and the `componentKindRow`/`componentRow`
+  fixtures.
+
+The screens for this stage — `/assets/kinds` and the components card on a unit —
+land with the other screens in the final gate, so the rules and the schema are
+reviewed before anything is drawn on top of them.
+
 ## Not yet
 
-Stage 3 onward: `component_kinds`, `asset_components`, component booking lines,
-`asset_usage_logs`, `component_service_events` and `component_service_status`;
-the `asset_status` enum change. Also still out: the renter-facing API, renter
-email, deposits.
+Stage 4 onward: `booking_line_items.component_id` and its partial exclusion
+constraint, `asset_usage_logs`, `component_service_events` and
+`component_service_status`; the `asset_status` enum change; the screens listed
+above. Also still out: the renter-facing API, renter email, deposits.
 
 ## Order of work
 

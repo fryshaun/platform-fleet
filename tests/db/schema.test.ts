@@ -47,6 +47,8 @@ const MIGRATION_FILES = [
   "20260101001500_catalog_addons.sql",
   "20260101001600_addons_write_gate.sql",
   "20260101001700_addon_stock.sql",
+  "20260101001800_asset_components.sql",
+  "20260101001900_components_write_gate.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -72,16 +74,23 @@ const bookingsGateSql = readMigration("20260101001400_bookings_write_gate.sql");
 const addonsSql = readMigration("20260101001500_catalog_addons.sql");
 const addonsGateSql = readMigration("20260101001600_addons_write_gate.sql");
 const addonStockSql = readMigration("20260101001700_addon_stock.sql");
+const componentsSql = readMigration("20260101001800_asset_components.sql");
+const componentsGateSql = readMigration(
+  "20260101001900_components_write_gate.sql",
+);
 
 /**
  * The write gate is more than one file: a policy cannot name a table that does
- * not exist yet, so migrations 14 and 16 state the same rule for the tables
- * migrations 13 and 15 add. The policy names are unique across them, which is
- * what lets the gate assertions below read one string.
+ * not exist yet, so migrations 14, 16 and 19 state the same rule for the tables
+ * migrations 13, 15 and 18 add. The policy names are unique across them, which
+ * is what lets the gate assertions below read one string.
  */
-const allGateSql = [subscriptionGateSql, bookingsGateSql, addonsGateSql].join(
-  "\n",
-);
+const allGateSql = [
+  subscriptionGateSql,
+  bookingsGateSql,
+  addonsGateSql,
+  componentsGateSql,
+].join("\n");
 
 const allSql = [
   accountsSql,
@@ -99,6 +108,8 @@ const allSql = [
   addonsSql,
   addonsGateSql,
   addonStockSql,
+  componentsSql,
+  componentsGateSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -132,6 +143,16 @@ const PRODUCT_TABLES = [
  * section on never reads a row of it. */
 const ASSET_TABLES = ["assets"] as const satisfies readonly TableName[];
 
+/**
+ * The fleet's internals (migration 18): the taxonomy and the parts. They belong
+ * to the assets section, and their policies ask about `assets` — not `products`,
+ * which is the guess the new names invite.
+ */
+const COMPONENT_TABLES = [
+  "component_kinds",
+  "asset_components",
+] as const satisfies readonly TableName[];
+
 /** The renters module: the people a booking is for, not the staff who take it. */
 const RENTER_TABLES = [
   "customers",
@@ -158,6 +179,7 @@ const ADDON_TABLES = [
 const MODULE_TABLES = [
   ...PRODUCT_TABLES,
   ...ASSET_TABLES,
+  ...COMPONENT_TABLES,
   ...RENTER_TABLES,
   ...BOOKING_TABLES,
   ...ADDON_TABLES,
@@ -1515,6 +1537,8 @@ describe("the subscription write gate", () => {
     "addons",
     "addon_products",
     "booking_line_addons",
+    "component_kinds",
+    "asset_components",
   ] as const;
 
   const CARVED_OUT = ["companies", "profiles", "company_members"] as const;
@@ -1947,6 +1971,80 @@ describe("add-on stock", () => {
       MIGRATION_FILES.indexOf("20260101001700_addon_stock.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101001500_catalog_addons.sql"),
+    );
+  });
+});
+
+describe("components", () => {
+  /** One policy, from `create policy` to the semicolon that ends it. */
+  function policyFor(begin: string): string {
+    return componentsSql.match(new RegExp(`${begin}[\\s\\S]*?;`))?.[0] ?? "";
+  }
+
+  it("keeps a component when its unit or kind goes away", () => {
+    // The part still exists, still has a serial and still needs servicing: a
+    // cascade would erase the history that is the reason the row exists.
+    expect(componentsSql).toContain("on delete set null (asset_id)");
+    expect(componentsSql).toContain("on delete set null (kind_id)");
+  });
+
+  it("states the fitted window as half-open, with a null meaning fitted", () => {
+    expect(componentsSql).toContain(
+      "removed_on is null or removed_on > fitted_on",
+    );
+    expect(componentsSql).toContain("removed_on date");
+    expect(componentsSql).toContain("NULL means it is fitted now");
+  });
+
+  it("allows one fitted part of a kind per unit", () => {
+    // Two forks on one bike is a typo, not a fitting. A partial unique index is
+    // what holds under two people fitting at once.
+    expect(componentsSql).toContain(
+      "create unique index if not exists asset_components_fitted_kind_idx",
+    );
+    expect(componentsSql).toContain(
+      "where asset_id is not null and kind_id is not null and removed_on is null",
+    );
+  });
+
+  it("asks about the assets section, not products or bookings", () => {
+    for (const policy of [
+      policyFor('create policy "component_kinds_select_member"'),
+      policyFor('create policy "component_kinds_insert_manager"'),
+      policyFor('create policy "asset_components_select_member"'),
+      policyFor('create policy "asset_components_insert_frontdesk"'),
+      policyFor('create policy "asset_components_delete_manager"'),
+    ]) {
+      expect(policy).toContain("public.has_company_section(company_id, 'assets')");
+      expect(policy).not.toContain("'products'");
+      expect(policy).not.toContain("'bookings'");
+    }
+  });
+
+  it("lets the workshop fit a part and a manager delete one", () => {
+    // Fitting happens in the workshop; deleting a component erases its history.
+    expect(policyFor('create policy "asset_components_insert_frontdesk"')).toContain(
+      "'staff'",
+    );
+    expect(policyFor('create policy "asset_components_delete_manager"')).not.toContain(
+      "'staff'",
+    );
+    expect(policyFor('create policy "component_kinds_delete_manager"')).not.toContain(
+      "'staff'",
+    );
+  });
+
+  it("gives the later stages a composite key to point at", () => {
+    // Migration 20 hangs a booking line off a component; that foreign key needs
+    // this unique pair to exist first.
+    expect(componentsSql).toContain("unique (company_id, id)");
+  });
+
+  it("is gated after the tables it gates", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001900_components_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001800_asset_components.sql"),
     );
   });
 });

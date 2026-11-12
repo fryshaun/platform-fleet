@@ -194,6 +194,46 @@ export function lineAddonRow(
   };
 }
 
+/** A component kind in the fixture workspace. */
+export const COMPONENT_KIND_ID = "99999999-9999-4999-8999-999999999999";
+
+export function componentKindRow(
+  overrides: Partial<Tables<"component_kinds">> = {},
+): Tables<"component_kinds"> {
+  return {
+    id: COMPONENT_KIND_ID,
+    company_id: COMPANY_ID,
+    name: "Fork",
+    handle: "fork",
+    position: 0,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A component in the fixture workspace, fitted to the fixture unit. */
+export const COMPONENT_ID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+
+export function componentRow(
+  overrides: Partial<Tables<"asset_components">> = {},
+): Tables<"asset_components"> {
+  return {
+    id: COMPONENT_ID,
+    company_id: COMPANY_ID,
+    kind_id: COMPONENT_KIND_ID,
+    asset_id: ASSET_ID,
+    name: "Fox 36",
+    serial: "FOX-36-001",
+    fitted_on: "2026-01-02",
+    removed_on: null,
+    notes: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 /**
  * A plan as the catalogue hands it to the checkout actions.
  *
