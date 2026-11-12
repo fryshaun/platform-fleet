@@ -270,3 +270,57 @@ export function formatStatusChanged(iso: string): string {
   }).format(new Date(iso));
 }
 
+
+// -----------------------------------------------------------------------------
+// The unit page's tabs
+// -----------------------------------------------------------------------------
+/**
+ * The unit page is a screen split into tabs, and every tab is a real URL — the
+ * same arrangement `lib/settings.ts` makes for the settings screens, for the
+ * same reasons: the pages stay server-rendered, a link to "Service" means
+ * something, and the back button moves between tabs.
+ *
+ * Overview is the index (`/assets/<handle>`) because that URL existed before the
+ * split, and it is where the fleet list and every redirect still point.
+ *
+ * This module is the only place that knows the order, the labels and the paths,
+ * so the strip, the header and every redirect agree by construction.
+ */
+export type AssetTab = "overview" | "components" | "usage" | "service";
+
+export type AssetTabDefinition = {
+  tab: AssetTab;
+  /** Label in the tab strip. */
+  label: string;
+  /** Path segment under the unit's handle; empty for the index tab. */
+  segment: string;
+};
+
+export const ASSET_TABS: readonly AssetTabDefinition[] = [
+  { tab: "overview", label: "Overview", segment: "" },
+  { tab: "components", label: "Components", segment: "components" },
+  { tab: "usage", label: "Usage", segment: "usage" },
+  { tab: "service", label: "Service", segment: "service" },
+];
+
+/** `/acme/assets/bike-1/service` — a link to a tab. */
+export function assetTabPath(
+  slug: string,
+  handle: string,
+  tab: AssetTab,
+): string {
+  return `/${slug}/${assetTabSegment(handle, tab)}`;
+}
+
+/**
+ * The path after the workspace slug, shaped like the `path` argument of
+ * `redirectWith`, which prepends `/{slug}/`. A Server Action names a tab instead
+ * of spelling the URL out, so a typo fails to compile rather than 404s.
+ */
+export function assetTabSegment(handle: string, tab: AssetTab): string {
+  const definition = ASSET_TABS.find((entry) => entry.tab === tab);
+  return definition?.segment
+    ? `assets/${handle}/${definition.segment}`
+    : `assets/${handle}`;
+}
+

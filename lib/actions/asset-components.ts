@@ -11,6 +11,7 @@ import {
   requireSection,
   requireWritableWorkspace,
 } from "@/lib/actions/support";
+import { assetTabSegment } from "@/lib/assets";
 import { parseComponentDraft, parseComponentKindDraft } from "@/lib/components";
 
 /**
@@ -48,10 +49,16 @@ function writeErrorMessage(error: { message: string; code?: string }): string {
   return error.message;
 }
 
-/** The page a component form should return to, given the hidden handle field. */
+/**
+ * The page a component form should return to, given the hidden handle field.
+ *
+ * Parts are fitted and removed on the unit's Components tab, so that is where a
+ * form comes back to — named through `assetTabSegment` rather than spelled out,
+ * so a change to the tab's path cannot leave this behind.
+ */
 function assetPath(formData: FormData): string {
   const handle = readField(formData, "current_handle");
-  return handle ? `assets/${handle}` : "assets";
+  return handle ? assetTabSegment(handle, "components") : "assets";
 }
 
 // -----------------------------------------------------------------------------

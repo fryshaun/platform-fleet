@@ -4,7 +4,13 @@ import type { MemberRole } from "@/lib/supabase/types";
 
 import { READ_ONLY_MESSAGE } from "@/lib/billing/entitlements";
 
-import { COMPANY_ID, COMPONENT_KIND_ID, formDataOf } from "../helpers/fixtures";
+import {
+  ASSET_ID,
+  COMPANY_ID,
+  COMPONENT_ID,
+  COMPONENT_KIND_ID,
+  formDataOf,
+} from "../helpers/fixtures";
 import {
   captureRedirect,
   redirectParams,
@@ -36,8 +42,15 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: serverMock.createClient,
 }));
 
-const { createComponentKind, deleteComponentKind, updateComponentKind } =
-  await import("@/lib/actions/asset-components");
+const {
+  createComponent,
+  createComponentKind,
+  deleteComponent,
+  deleteComponentKind,
+  removeComponent,
+  updateComponent,
+  updateComponentKind,
+} = await import("@/lib/actions/asset-components");
 
 /**
  * The assets section is on, the workspace is paying and the caller manages the
@@ -58,6 +71,14 @@ function setup(
 
 /** The smallest valid kind form. */
 const KIND = { slug: "acme", name: "Fork" };
+
+/** The smallest valid part form, fitted to a unit. */
+const PART = {
+  slug: "acme",
+  current_handle: "bike-1",
+  name: "Fox 36",
+  fitted_on: "2026-01-02",
+};
 
 beforeEach(() => cacheMock.revalidatePath.mockReset());
 
@@ -160,6 +181,7 @@ describe("createComponentKind", () => {
     );
   });
 });
+
 describe("updateComponentKind", () => {
   it("writes the row it was given, inside the workspace", async () => {
     const mock = setup();
@@ -216,6 +238,230 @@ describe("deleteComponentKind", () => {
     ]);
     expect(redirectPath(url)).toBe("/acme/assets/kinds");
     expect(redirectParams(url).get("ok")).toBe("Kind deleted.");
+  });
+});
+
+
+describe("createComponent", () => {
+  it("fits a part from the front desk", async () => {
+    const mock = setup("staff");
+
+    const url = await captureRedirect(() =>
+      createComponent(
+        formDataOf({
+          ...PART,
+          serial: "FOX-36-001",
+          kind_id: COMPONENT_KIND_ID,
+          asset_id: ASSET_ID,
+          notes: "Serviced at fitting",
+        }),
+      ),
+    );
+
+    expect(mock.argFor("asset_components", "insert")).toEqual({
+      company_id: COMPANY_ID,
+      name: "Fox 36",
+      serial: "FOX-36-001",
+      kind_id: COMPONENT_KIND_ID,
+      asset_id: ASSET_ID,
+      fitted_on: "2026-01-02",
+      removed_on: null,
+      notes: "Serviced at fitting",
+    });
+    // Back to the tab the form lives on, not the unit's overview.
+    expect(redirectPath(url)).toBe("/acme/assets/bike-1/components");
+    expect(redirectParams(url).get("ok")).toBe("Added Fox 36.");
+  });
+
+  it("keeps a viewer out", async () => {
+    setup("member");
+
+    const url = await captureRedirect(() =>
+      createComponent(formDataOf(PART)),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
+  });
+
+  it("answers a window it would have to reject later", async () => {
+    const mock = setup("staff");
+
+    const url = await captureRedirect(() =>
+      createComponent(
+        formDataOf({ ...PART, removed_on: "2026-01-01" }),
+      ),
+    );
+
+    expect(redirectPath(url)).toBe("/acme/assets/bike-1/components");
+    expect(redirectParams(url).get("error")).toContain(
+      "cannot come off on or before",
+    );
+    expect(mock.methodsFor("asset_components")).toEqual([]);
+  });
+
+  it("falls back to the fleet when the form forgot the handle", async () => {
+    const mock = setup("staff");
+
+    const url = await captureRedirect(() =>
+      createComponent(
+        formDataOf({ slug: "acme", name: "Spare wheel", fitted_on: "2026-01-02" }),
+      ),
+    );
+
+    expect(redirectPath(url)).toBe("/acme/assets");
+    expect(mock.argFor("asset_components", "insert")).toMatchObject({
+      asset_id: null,
+    });
+  });
+});
+
+describe("updateComponent", () => {
+  it("writes the row it was given, inside the workspace", async () => {
+    const mock = setup("staff");
+
+    await captureRedirect(() =>
+      updateComponent(
+        formDataOf({
+          ...PART,
+          component_id: COMPONENT_ID,
+          asset_id: ASSET_ID,
+          removed_on: "2026-02-01",
+        }),
+      ),
+    );
+
+    expect(mock.argFor("asset_components", "update")).toEqual({
+      name: "Fox 36",
+      serial: null,
+      kind_id: null,
+      asset_id: ASSET_ID,
+      fitted_on: "2026-01-02",
+      removed_on: "2026-02-01",
+      notes: null,
+    });
+    expect(mock.argsFor("asset_components", "eq")).toEqual([
+      ["id", COMPONENT_ID],
+      ["company_id", COMPANY_ID],
+    ]);
+  });
+
+  it("asks for a component when the id is missing", async () => {
+    setup("staff");
+
+    const url = await captureRedirect(() =>
+      updateComponent(formDataOf(PART)),
+    );
+
+    expect(redirectParams(url).get("error")).toBe("Choose a component first.");
+  });
+});
+
+describe("removeComponent", () => {
+  it("dates the removal rather than deleting the row", async () => {
+    const mock = setup("staff");
+
+    const url = await captureRedirect(() =>
+      removeComponent(
+        formDataOf({
+          slug: "acme",
+          current_handle: "bike-1",
+          component_id: COMPONENT_ID,
+          removed_on: "2026-02-01",
+        }),
+      ),
+    );
+
+    expect(mock.argFor("asset_components", "update")).toEqual({
+      removed_on: "2026-02-01",
+    });
+    expect(mock.methodsFor("asset_components")).not.toContain("delete");
+    expect(redirectPath(url)).toBe("/acme/assets/bike-1/components");
+    expect(redirectParams(url).get("ok")).toBe("Component removed.");
+  });
+
+  it("defaults to today when the worksheet is today's", async () => {
+    const mock = setup("staff");
+
+    await captureRedirect(() =>
+      removeComponent(
+        formDataOf({
+          slug: "acme",
+          current_handle: "bike-1",
+          component_id: COMPONENT_ID,
+        }),
+      ),
+    );
+
+    expect(mock.argFor("asset_components", "update")).toEqual({
+      removed_on: new Date().toISOString().slice(0, 10),
+    });
+  });
+
+  it("explains a window the database refuses", async () => {
+    setup("staff", {
+      asset_components: () => ({
+        data: null,
+        error: { message: "check violation", code: "23514" },
+      }),
+    });
+
+    const url = await captureRedirect(() =>
+      removeComponent(
+        formDataOf({
+          slug: "acme",
+          current_handle: "bike-1",
+          component_id: COMPONENT_ID,
+          removed_on: "2026-01-01",
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toContain(
+      "Correct the fitted date first",
+    );
+  });
+});
+
+describe("deleteComponent", () => {
+  it("is manager work", async () => {
+    setup("staff");
+
+    const url = await captureRedirect(() =>
+      deleteComponent(
+        formDataOf({
+          slug: "acme",
+          current_handle: "bike-1",
+          component_id: COMPONENT_ID,
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "You do not have permission to do that.",
+    );
+  });
+
+  it("removes the part, scoped to the workspace", async () => {
+    const mock = setup();
+
+    const url = await captureRedirect(() =>
+      deleteComponent(
+        formDataOf({
+          slug: "acme",
+          current_handle: "bike-1",
+          component_id: COMPONENT_ID,
+        }),
+      ),
+    );
+
+    expect(mock.argsFor("asset_components", "eq")).toEqual([
+      ["id", COMPONENT_ID],
+      ["company_id", COMPANY_ID],
+    ]);
+    expect(redirectPath(url)).toBe("/acme/assets/bike-1/components");
+    expect(redirectParams(url).get("ok")).toBe("Component deleted.");
   });
 });
 

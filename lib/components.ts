@@ -1,4 +1,4 @@
-import { isIsoDate } from "@/lib/products";
+import { formatDateRange, isIsoDate } from "@/lib/products";
 import { SLUG_PROBLEM_MESSAGES, slugify, validateSlug } from "@/lib/slug";
 import type { Tables } from "@/lib/supabase/types";
 
@@ -204,6 +204,9 @@ export type ComponentKindDraft = {
 /** The id of the "new kind" `<form>`, so the panel's footer button can submit it. */
 export const NEW_KIND_FORM_ID = "kind-new-form";
 
+/** The id of the "fit a part" `<form>` on a unit's Components tab. */
+export const NEW_COMPONENT_FORM_ID = "component-new-form";
+
 /** Reads and validates a taxonomy row. */
 export function parseComponentKindDraft(
   formData: FormData,
@@ -307,6 +310,22 @@ export function componentWhereLabel(
   if (component.removed_on !== null) return "Removed";
   if (component.asset_id === null) return "In the parts bin";
   return `Fitted to ${assetName ?? "a unit"}`;
+}
+
+/**
+ * The fitted window in words: "Mar 4, 2026" while the part is on, and
+ * "Mar 4 – Mar 8, 2026" once it came off.
+ *
+ * Both columns are `date`, so the range helper reads them in UTC and the day the
+ * operator typed never moves with the server's zone.
+ */
+export function fittedWindowLabel(
+  component: Pick<AssetComponent, "fitted_on" | "removed_on">,
+): string {
+  return formatDateRange(
+    component.fitted_on,
+    component.removed_on ?? component.fitted_on,
+  );
 }
 
 /** The components on one unit, fitted ones first, newest fitting first. */

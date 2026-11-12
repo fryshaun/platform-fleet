@@ -6,11 +6,14 @@ import {
   ASSET_STATUS_LABELS,
   ASSET_STATUS_OPTIONS,
   ASSET_STATUSES,
+  ASSET_TABS,
   assetHandleProblem,
   assetNameProblem,
   assetsByProduct,
   assetsForProduct,
   assetStatusLabel,
+  assetTabPath,
+  assetTabSegment,
   availabilityLabel,
   deriveAssetHandle,
   formatStatusChanged,
@@ -252,6 +255,39 @@ describe("formatStatusChanged", () => {
     expect(formatStatusChanged("2026-03-04T09:31:00.000Z")).toBe(
       "Mar 4, 2026, 9:31 AM",
     );
+  });
+});
+
+
+describe("the unit page's tabs", () => {
+  it("names four tabs, the first at the bare handle", () => {
+    expect(ASSET_TABS.map((entry) => entry.label)).toEqual([
+      "Overview",
+      "Components",
+      "Usage",
+      "Service",
+    ]);
+    // Overview is the index: it is what `/assets/<handle>` has always meant, so
+    // old links and the fleet list keep working.
+    expect(ASSET_TABS[0].segment).toBe("");
+  });
+
+  it("builds the links the strip draws", () => {
+    expect(assetTabPath("acme", "bike-1", "overview")).toBe(
+      "/acme/assets/bike-1",
+    );
+    expect(assetTabPath("acme", "bike-1", "components")).toBe(
+      "/acme/assets/bike-1/components",
+    );
+    expect(assetTabPath("acme", "bike-1", "service")).toBe(
+      "/acme/assets/bike-1/service",
+    );
+  });
+
+  it("gives redirects a path with no workspace slug in it", () => {
+    // `redirectWith` prepends `/{slug}/`, so the segment must not repeat it.
+    expect(assetTabSegment("bike-1", "usage")).toBe("assets/bike-1/usage");
+    expect(assetTabSegment("bike-1", "overview")).toBe("assets/bike-1");
   });
 });
 
