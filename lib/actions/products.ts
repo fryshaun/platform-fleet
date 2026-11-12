@@ -11,7 +11,12 @@ import {
   redirectWith,
   requireManager,
   requireSection,
+  requireWritableWorkspace,
 } from "@/lib/actions/support";
+import {
+  isWorkspaceWritable,
+  READ_ONLY_MESSAGE,
+} from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import {
   categoryHandleProblem,
@@ -202,6 +207,7 @@ export async function createProduct(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const parsed = readProductDraft(formData, context.company.currency);
   if ("error" in parsed) {
@@ -234,6 +240,7 @@ export async function updateProduct(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const productId = readField(formData, "product_id");
   if (!productId) {
@@ -268,6 +275,7 @@ export async function setProductStatus(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const productId = readField(formData, "product_id");
@@ -302,6 +310,7 @@ export async function deleteProduct(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const productId = readField(formData, "product_id");
   if (!productId) {
@@ -336,6 +345,7 @@ export async function createVariant(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const parentId = readField(formData, "parent_id");
@@ -419,6 +429,7 @@ export async function updateInventory(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const productId = readField(formData, "product_id");
@@ -463,6 +474,7 @@ export async function addProductDate(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const productId = readField(formData, "product_id");
@@ -516,6 +528,7 @@ export async function deleteProductDate(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const dateId = readField(formData, "date_id");
@@ -547,6 +560,7 @@ export async function createCategory(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const name = readField(formData, "name");
   if (name.length < 2) {
@@ -582,6 +596,7 @@ export async function updateCategory(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const categoryId = readField(formData, "category_id");
   if (!categoryId) {
@@ -636,6 +651,7 @@ export async function deleteCategory(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const categoryId = readField(formData, "category_id");
   if (!categoryId) {
@@ -701,6 +717,10 @@ export async function createMediaUploadUrl(input: {
       ok: false,
       message: "That extension is not enabled for this workspace.",
     };
+  }
+  // Answered, not redirected: both upload actions are awaited inline.
+  if (!isWorkspaceWritable(context.company.subscription_status)) {
+    return { ok: false, message: READ_ONLY_MESSAGE };
   }
 
   const mediaType = mediaTypeFor(input.contentType);
@@ -775,6 +795,10 @@ export async function recordMediaUpload(input: {
       message: "That extension is not enabled for this workspace.",
     };
   }
+  // Answered, not redirected: both upload actions are awaited inline.
+  if (!isWorkspaceWritable(context.company.subscription_status)) {
+    return { ok: false, message: READ_ONLY_MESSAGE };
+  }
 
   const mediaType = mediaTypeFor(input.contentType);
   if (!mediaType) {
@@ -814,6 +838,7 @@ export async function addMediaLink(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const productId = readField(formData, "product_id");
@@ -850,6 +875,7 @@ export async function removeProductMedia(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "products");
+  requireWritableWorkspace(context, slug, "products");
 
   const back = productPath(formData);
   const mediaId = readField(formData, "media_id");

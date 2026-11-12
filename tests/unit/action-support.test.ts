@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { READ_ONLY_MESSAGE } from "@/lib/billing/entitlements";
+import type { SubscriptionStatus } from "@/lib/supabase/types";
+
 import { companyRow } from "../helpers/fixtures";
 import {
   captureRedirect,
@@ -35,6 +38,7 @@ const {
   requireAdministrator,
   requireFrontDesk,
   requireManager,
+  requireWritableWorkspace,
 } = await import("@/lib/actions/support");
 
 describe("readField", () => {
@@ -277,6 +281,40 @@ describe("permission gates", () => {
     expect(redirectParams(url).get("error")).toBe(
       "You do not have permission to do that.",
     );
+  });
+});
+
+
+describe("requireWritableWorkspace", () => {
+  type Context = Parameters<typeof requireWritableWorkspace>[0];
+  const context = (status: SubscriptionStatus) =>
+    ({ company: { subscription_status: status } }) as unknown as Context;
+
+  it.each(["active", "trialing", "past_due"] as const)(
+    "lets a %s workspace write",
+    (status) => {
+      expect(() =>
+        requireWritableWorkspace(context(status), "acme", "products"),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([
+    "none",
+    "canceled",
+    "unpaid",
+    "incomplete",
+    "incomplete_expired",
+    "paused",
+  ] as const)("sends a %s workspace back to the form's own page", async (status) => {
+    const url = await captureRedirect(() => {
+      requireWritableWorkspace(context(status), "acme", "assets");
+    });
+
+    // The page that owns the form, not the dashboard: the read-only banner lives
+    // there, so the sentence lands next to the rule it explains.
+    expect(redirectPath(url)).toBe("/acme/assets");
+    expect(redirectParams(url).get("error")).toBe(READ_ONLY_MESSAGE);
   });
 });
 

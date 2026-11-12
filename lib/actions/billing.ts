@@ -3,11 +3,13 @@
 import { redirect } from "next/navigation";
 
 import { buildSubscriptionData } from "@/lib/billing/checkout";
+import { readOwnedCustomer } from "@/lib/billing/customer";
 import { hasLiveSubscription } from "@/lib/billing/sync";
 import type { SubscriptionPlan } from "@/lib/plans";
 import { getOrigin } from "@/lib/site";
 import { getStripe } from "@/lib/stripe";
 import { findSubscriptionPlan } from "@/lib/subscriptions";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getActionContext,
   readField,
@@ -44,6 +46,31 @@ export async function openBillingPortal(formData: FormData) {
   const origin = await getOrigin();
   const stripe = getStripe();
 
+  // The customer id comes from our own row, so it has to be proved to be *this*
+  // company's customer before it becomes a portal session: a row pointed at
+  // somebody else's customer would otherwise open their invoices. The checkout
+  // path asks the same question through the same helper.
+  const owned = await readOwnedCustomer(
+    stripe,
+    company.stripe_customer_id,
+    company,
+  );
+
+  if (!owned.ok) {
+    if (owned.reason === "unreadable") {
+      redirectWith(slug, "settings/billing", {
+        error: "We could not open the billing portal just now. Please try again.",
+      });
+    }
+
+    console.error(
+      `Refusing a portal session: customer ${company.stripe_customer_id} does not belong to company ${company.id} (${owned.reason}).`,
+    );
+    redirectWith(slug, "settings/billing", {
+      error: "That billing account does not belong to this workspace.",
+    });
+  }
+
   const session = await stripe.billingPortal.sessions.create({
     customer: company.stripe_customer_id,
     return_url: `${origin}/${slug}/settings/billing`,
@@ -66,7 +93,7 @@ export async function startSubscriptionCheckout(formData: FormData) {
     redirect("/workspaces");
   }
 
-  const { supabase, company, role, user } = await getActionContext(slug);
+  const { company, role, user } = await getActionContext(slug);
 
   if (!canAdminister(role)) {
     redirectWith(slug, "settings/billing", { error: BILLING_REFUSED });
@@ -107,6 +134,30 @@ export async function startSubscriptionCheckout(formData: FormData) {
   try {
     let customerId = company.stripe_customer_id;
 
+    if (customerId) {
+      const owned = await readOwnedCustomer(stripe, customerId, company);
+
+      if (!owned.ok && owned.reason === "unreadable") {
+        // A transient Stripe read must not become a second customer for the same
+        // workspace, so this one answers instead of guessing. Thrown rather than
+        // redirected because `redirect()`'s own error would be caught below.
+        throw new Error(
+          "We could not check this workspace's billing account just now. Please try again.",
+        );
+      }
+
+      if (!owned.ok) {
+        // `deleted` / `mismatch`: the row points at a customer this workspace
+        // cannot prove it owns. A checkout session bound to that id would offer
+        // *that* customer's saved card, so the id is dropped and a fresh customer
+        // is created below — a new customer has no payment method to charge.
+        console.error(
+          `Discarding Stripe customer ${customerId} for company ${company.id}: ${owned.reason}.`,
+        );
+        customerId = null;
+      }
+    }
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         name: company.name,
@@ -120,10 +171,12 @@ export async function startSubscriptionCheckout(formData: FormData) {
       customerId = customer.id;
 
       // Persist before checkout so reconciliation can read the subscription
-      // back by customer even if the webhook never lands. `companies` is
-      // updatable by owners and admins under RLS, so the request-scoped client
-      // is enough here.
-      const { error } = await supabase
+      // back by customer even if the webhook never lands. The write goes through
+      // the service role: `stripe_customer_id` is one of the columns
+      // `20260101001000_company_billing_guard.sql` takes off a signed-in
+      // session, because a customer id a browser can repoint is a billing
+      // portal somewhere else.
+      const { error } = await createAdminClient()
         .from("companies")
         .update({ stripe_customer_id: customerId })
         .eq("id", company.id);

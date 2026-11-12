@@ -4,11 +4,13 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
+import { ReadOnlyNotice } from "@/components/billing/read-only-notice";
 import { FormMessage } from "@/components/form-message";
 import { FormSheet } from "@/components/tenant/form-sheet";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import { getTenantContext } from "@/lib/auth";
+import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import { firstImagePerProduct } from "@/lib/product-media";
 import {
@@ -19,7 +21,7 @@ import {
   PRODUCT_STATUS_OPTIONS,
   readProductSort,
 } from "@/lib/products";
-import { canManage } from "@/lib/roles";
+import { canAdminister, canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
@@ -125,7 +127,12 @@ async function ProductsContent({
 
   const families = groupVariants(productRows ?? []);
   const categories = categoryRows ?? [];
-  const canEdit = canManage(role);
+  // The catalogue stays on screen when a subscription lapses — reads are never
+  // gated — but the create affordances go with the writes: `canEdit` is what
+  // the header action and the empty state check, so nothing offers a form whose
+  // action would refuse it. The banner says why.
+  const writable = isWorkspaceWritable(company.subscription_status);
+  const canEdit = canManage(role) && writable;
   const filtered = Boolean(status || categoryId);
 
   // Every row the deck can draw a picture for: the parents, plus their variants
@@ -168,11 +175,16 @@ async function ProductsContent({
         description="Everything this workspace sells: categories, variants, stock and gallery."
         actions={
           <>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/${company.slug}/products/categories`}>
-                Categories
-              </Link>
-            </Button>
+            {/* Categories is a manager page that only files things, so a
+                read-only workspace is not offered it: it would bounce straight
+                back to this banner. */}
+            {writable ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/${company.slug}/products/categories`}>
+                  Categories
+                </Link>
+              </Button>
+            ) : null}
             {canEdit ? (
               <FormSheet
                 triggerLabel="New product"
@@ -199,6 +211,13 @@ async function ProductsContent({
           </>
         }
       />
+
+      {writable ? null : (
+        <ReadOnlyNotice
+          slug={company.slug}
+          canManageBilling={canAdminister(role)}
+        />
+      )}
 
       <FormMessage
         error={readParam(query.error)}

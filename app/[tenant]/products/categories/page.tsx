@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
@@ -10,6 +10,10 @@ import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getTenantContext } from "@/lib/auth";
+import {
+  isWorkspaceWritable,
+  READ_ONLY_MESSAGE,
+} from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import {
   CATEGORY_SORT_OPTIONS,
@@ -61,6 +65,15 @@ async function CategoriesContent({
   // read the category names on the product form and in the catalogue filter.
   if (!isSectionEnabled(company, "products") || !canManage(role)) {
     notFound();
+  }
+
+  // A read-only workspace can file nothing new, so this page has nothing to do.
+  // The catalogue keeps the filter and the names; the banner there says why the
+  // forms are gone.
+  if (!isWorkspaceWritable(company.subscription_status)) {
+    redirect(
+      `/${company.slug}/products?error=${encodeURIComponent(READ_ONLY_MESSAGE)}`,
+    );
   }
 
   const search = categorySearchTerm(readParam(query.q));

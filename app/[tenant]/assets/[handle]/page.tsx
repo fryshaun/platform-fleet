@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
+import { ReadOnlyNotice } from "@/components/billing/read-only-notice";
 import { FormMessage } from "@/components/form-message";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,9 @@ import {
   type Asset,
 } from "@/lib/assets";
 import { getTenantContext } from "@/lib/auth";
+import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
-import { canFrontDesk, canManage } from "@/lib/roles";
+import { canAdminister, canFrontDesk, canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
@@ -81,8 +83,12 @@ async function AssetContent({
     notFound();
   }
 
-  const canEdit = canManage(role);
-  const canUpdateStatus = canFrontDesk(role);
+  // A lapsed subscription closes every write, and it closes them for everyone:
+  // the front desk's status buttons go with the manager's edit form. Reads stay
+  // open, so the record is still here — the banner explains why it is frozen.
+  const writable = isWorkspaceWritable(company.subscription_status);
+  const canUpdateStatus = canFrontDesk(role) && writable;
+  const canEdit = canManage(role) && writable;
   const productsEnabled = isSectionEnabled(company, "products");
 
   // The picker and the product name both come from the catalogue, so neither is
@@ -129,6 +135,13 @@ async function AssetContent({
         <AssetStatusBadge status={asset.status} />
         <AssetAvailabilityBadge asset={asset} />
       </div>
+
+      {writable ? null : (
+        <ReadOnlyNotice
+          slug={company.slug}
+          canManageBilling={canAdminister(role)}
+        />
+      )}
 
       <FormMessage
         error={readParam(query.error)}

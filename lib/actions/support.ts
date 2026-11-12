@@ -2,6 +2,10 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 
+import {
+  isWorkspaceWritable,
+  READ_ONLY_MESSAGE,
+} from "@/lib/billing/entitlements";
 import { isSectionEnabled, type SectionKey } from "@/lib/features";
 import { toMfaFactors } from "@/lib/mfa";
 import { enforceMfa } from "@/lib/mfa-server";
@@ -181,6 +185,29 @@ export function requireSection(
     redirectWith(slug, "dashboard", {
       error: "That extension is not enabled for this workspace.",
     });
+  }
+}
+
+/**
+ * Throws unless the workspace may still write.
+ *
+ * This is the Server Action half of `has_active_subscription()`: the
+ * restrictive policies in `20260101001100_subscription_write_gate.sql` are what
+ * actually stop the write, and this turns the refusal into a sentence a person
+ * can act on. It sends the caller to `path` — the page that owns the form — so
+ * the message lands beside the read-only banner instead of on the dashboard.
+ *
+ * Only the content a subscription pays for asks this. Settings, billing, the
+ * team and the account stay writable, so a lapsed workspace can repair its card
+ * or leave without asking anyone.
+ */
+export function requireWritableWorkspace(
+  context: ActionContext,
+  slug: string,
+  path: string,
+) {
+  if (!isWorkspaceWritable(context.company.subscription_status)) {
+    redirectWith(slug, path, { error: READ_ONLY_MESSAGE });
   }
 }
 

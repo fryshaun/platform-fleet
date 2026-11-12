@@ -9,6 +9,7 @@ import {
   requireFrontDesk,
   requireManager,
   requireSection,
+  requireWritableWorkspace,
 } from "@/lib/actions/support";
 import {
   ASSET_STATUS_LABELS,
@@ -135,6 +136,7 @@ export async function createAsset(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "assets");
+  requireWritableWorkspace(context, slug, "assets");
 
   const parsed = readAssetDraft(formData);
   if ("error" in parsed) {
@@ -166,6 +168,7 @@ export async function updateAsset(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "assets");
+  requireWritableWorkspace(context, slug, "assets");
 
   const assetId = readField(formData, "asset_id");
   const back = assetPath(formData);
@@ -210,6 +213,7 @@ export async function setAssetStatus(formData: FormData) {
   const context = await getActionContext(slug);
   requireFrontDesk(context, slug);
   requireSection(context, slug, "assets");
+  requireWritableWorkspace(context, slug, "assets");
 
   const back = assetPath(formData);
   const assetId = readField(formData, "asset_id");
@@ -244,6 +248,7 @@ export async function deleteAsset(formData: FormData) {
   const context = await getActionContext(slug);
   requireManager(context, slug);
   requireSection(context, slug, "assets");
+  requireWritableWorkspace(context, slug, "assets");
 
   const assetId = readField(formData, "asset_id");
   if (!assetId) {

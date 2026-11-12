@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-import type { MemberRole } from "@/lib/supabase/types";
+import type { MemberRole, SubscriptionStatus } from "@/lib/supabase/types";
 
 import { companyRow } from "./fixtures";
 import {
@@ -17,6 +17,13 @@ type CreateClientMock = { mockResolvedValue: (client: unknown) => unknown };
 export type TenantSetupOptions = {
   /** Sections the fixture company has switched on. None by default. */
   sections?: string[];
+  /**
+   * The fixture workspace's subscription. Left at the column's own default
+   * (`none`) so the helper tells the truth about a fresh company; a section's
+   * tests that write pass `active`, because a lapsed workspace is refused by
+   * `requireWritableWorkspace()` before it reaches its own table.
+   */
+  subscription?: SubscriptionStatus;
   /** Bucket method overrides, keyed by bucket id. */
   storage?: Record<string, StorageBucketOverrides>;
 };
@@ -39,7 +46,10 @@ export function tenantSetup(
     storage: options.storage,
     tables: {
       companies: () => ({
-        data: companyRow({ enabled_sections: options.sections ?? [] }),
+        data: companyRow({
+          enabled_sections: options.sections ?? [],
+          subscription_status: options.subscription ?? "none",
+        }),
         error: null,
       }),
       company_members: () => ({ data: { role }, error: null }),

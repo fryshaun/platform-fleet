@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
+import { ReadOnlyNotice } from "@/components/billing/read-only-notice";
 import { FormMessage } from "@/components/form-message";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { deleteProduct, setProductStatus } from "@/lib/actions/products";
 import { getTenantContext } from "@/lib/auth";
+import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import {
   formatProductPrice,
@@ -25,7 +27,7 @@ import {
   PRODUCT_STATUS_OPTIONS,
   type Product,
 } from "@/lib/products";
-import { canManage } from "@/lib/roles";
+import { canAdminister, canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
@@ -85,7 +87,11 @@ async function ProductContent({
     notFound();
   }
 
-  const canEdit = canManage(role);
+  // A lapsed subscription closes every write on this page — the edit form, the
+  // variants, the dates, the gallery and the status change. Reads stay open, so
+  // the record is still here; the banner explains why it is frozen.
+  const writable = isWorkspaceWritable(company.subscription_status);
+  const canEdit = canManage(role) && writable;
 
   const [
     { data: categories },
@@ -177,6 +183,13 @@ async function ProductContent({
           </span>
         ) : null}
       </div>
+
+      {writable ? null : (
+        <ReadOnlyNotice
+          slug={company.slug}
+          canManageBilling={canAdminister(role)}
+        />
+      )}
 
       <FormMessage
         error={readParam(query.error)}
