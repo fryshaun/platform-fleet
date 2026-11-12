@@ -24,6 +24,35 @@ re-checked by every policy of the module it belongs to.
 | Database    | Supabase Postgres with RLS                                            |
 | Billing     | Stripe Checkout + Billing Portal + webhook sync                        |
 
+### Toolchain
+
+Node 22 is the floor: `.github/workflows/ci.yml` pins it, and `vitest` 5 needs
+22.12 or newer, so a Node 20 machine fails to start the suite instead of failing
+it somewhere confusing. `@types/node` tracks that runtime (`^22`) rather than the
+newest published line — compiling against types for a Node that never runs the
+code hides exactly the API mismatches the types exist to catch.
+
+Two ceilings are deliberate, and both are worth re-checking when the upstreams
+move:
+
+- **TypeScript stops at 6.0.3.** 6.0 is the bridge release to the Go port and
+  the last one on the JavaScript codebase. `typescript@7` publishes an `exports`
+  map whose `"."` is `lib/version.cjs` only, with the real API behind
+  `typescript/unstable/*`; that breaks both `typescript-eslint`
+  (peer `<6.1.0`) and Next's own type check, which calls `createProgram` from
+  `next/dist/lib/typescript/`. 6.0.3 still ships the whole
+  `lib/typescript.js`, so it is inside both supported windows and needs no
+  `tsconfig` change. Revisit when Next and `typescript-eslint` ship against the
+  new entrypoint.
+- **`eslint` 10 prints three unmet-peer warnings.** The plugins behind
+  `eslint-config-next` — `eslint-plugin-react` 7.37.5, `-import` 2.32.0,
+  `-jsx-a11y` 6.10.2 — still declare `eslint` peers capped at 9. That is
+  upstream lag, not breakage: each prefers `sourceCode.getScope`,
+  `getAncestors` and `markVariableAsUsed` and keeps the removed `context.*`
+  members only as a fallback, so the flat config runs unchanged and lint output
+  is identical to the 9.x run. If a plugin starts throwing at load, revert that
+  bump rather than papering over it with `@eslint/compat`.
+
 ## Brand
 
 The identity is code, not a checked-in mockup. `components/brand/logo.tsx` draws
@@ -928,9 +957,16 @@ breaks every other project on the same port.
   noticed.
 - `.github/dependabot.yml` opens grouped weekly PRs for npm and GitHub Actions,
   each of which runs the full gate.
-- `pnpm.overrides` pins `minimatch` (`>=11.0.1`) for the one path that resolved a
-  vulnerable copy. The override is scoped to that parent so ESLint keeps the
-  `minimatch` major it was written against.
+- `pnpm.overrides` forces `minimatch` to `>=11.0.1` for the range that is
+  vulnerable to
+  [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+  (`>=7.0.0 <11.0.1`). `eslint` 10 and `@eslint/config-array` pull `^10.2.6`,
+  and `@typescript-eslint/typescript-estree` pulls `^10.2.2`; no 10.x has the
+  fix, so without the override `pnpm audit` flags ESLint's own copy. The
+  override is scoped by version rather than by parent, which leaves the
+  `minimatch@3` copies that `eslint-plugin-{import,react,jsx-a11y}` were written
+  against untouched. `pnpm why minimatch` is the check: a single 11.0.8, plus
+  3.1.5 under those three plugins.
 
 ### What is deliberately not here
 
