@@ -142,6 +142,7 @@ export function lineItemRow(
     booking_id: BOOKING_ID,
     product_id: PRODUCT_ID,
     asset_id: null,
+    component_id: null,
     rider_id: null,
     quantity: 1,
     unit_price_cents: 4500,

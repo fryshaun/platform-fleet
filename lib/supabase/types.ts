@@ -627,6 +627,8 @@ export type Database = {
           booking_id: string;
           product_id: string | null;
           asset_id: string | null;
+          /** The part this line books, when it is not booking a whole unit. */
+          component_id: string | null;
           rider_id: string | null;
           quantity: number;
           unit_price_cents: number;
@@ -641,6 +643,7 @@ export type Database = {
           booking_id: string;
           product_id?: string | null;
           asset_id?: string | null;
+          component_id?: string | null;
           rider_id?: string | null;
           quantity?: number;
           unit_price_cents?: number;
@@ -655,6 +658,7 @@ export type Database = {
           booking_id?: string;
           product_id?: string | null;
           asset_id?: string | null;
+          component_id?: string | null;
           rider_id?: string | null;
           quantity?: number;
           unit_price_cents?: number;

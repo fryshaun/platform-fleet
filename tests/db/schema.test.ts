@@ -49,6 +49,7 @@ const MIGRATION_FILES = [
   "20260101001700_addon_stock.sql",
   "20260101001800_asset_components.sql",
   "20260101001900_components_write_gate.sql",
+  "20260101002000_component_bookings.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -77,6 +78,9 @@ const addonStockSql = readMigration("20260101001700_addon_stock.sql");
 const componentsSql = readMigration("20260101001800_asset_components.sql");
 const componentsGateSql = readMigration(
   "20260101001900_components_write_gate.sql",
+);
+const componentBookingsSql = readMigration(
+  "20260101002000_component_bookings.sql",
 );
 
 /**
@@ -110,6 +114,7 @@ const allSql = [
   addonStockSql,
   componentsSql,
   componentsGateSql,
+  componentBookingsSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -2045,6 +2050,91 @@ describe("components", () => {
       MIGRATION_FILES.indexOf("20260101001900_components_write_gate.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101001800_asset_components.sql"),
+    );
+  });
+});
+
+describe("components on a booking line", () => {
+  it("lets a line hold a unit or a part, never both", () => {
+    expect(componentBookingsSql).toContain(
+      "add column if not exists component_id uuid",
+    );
+    expect(componentBookingsSql).toContain(
+      "check (component_id is null or asset_id is null)",
+    );
+  });
+
+  it("keeps the part when its booking line or the part itself goes", () => {
+    expect(componentBookingsSql).toContain(
+      "references public.asset_components (company_id, id)",
+    );
+    expect(componentBookingsSql).toContain("on delete set null (component_id)");
+  });
+
+  it("books one part to one hire at a time", () => {
+    // The same shape the asset constraint has, on the same half-open window.
+    expect(componentBookingsSql).toContain(
+      "add constraint booking_line_items_component_no_overlap",
+    );
+    expect(componentBookingsSql).toContain("component_id with =,");
+    expect(componentBookingsSql).toContain(
+      "where (component_id is not null and blocks_stock)",
+    );
+  });
+
+  it("refuses to book a fitted part, and to fit a booked one", () => {
+    // The two halves are complements: a part can only be booked while it is out
+    // of a unit, and it cannot go into one while a hire is counting on it.
+    expect(componentBookingsSql).toContain(
+      "create or replace function public.booking_line_items_component_guard()",
+    );
+    expect(componentBookingsSql).toContain(
+      "That component is fitted to a unit, so it cannot be booked on its own",
+    );
+    expect(componentBookingsSql).toContain(
+      "create or replace function public.asset_components_booking_guard()",
+    );
+    expect(componentBookingsSql).toContain(
+      "That component is on a booking, so it cannot be fitted to a unit",
+    );
+  });
+
+  it("watches the columns that make the difference", () => {
+    // `removed_on` is watched because clearing it is the same act as fitting.
+    expect(componentBookingsSql).toContain(
+      "before insert or update of component_id, asset_id on public.booking_line_items",
+    );
+    expect(componentBookingsSql).toContain(
+      "before insert or update of asset_id, removed_on on public.asset_components",
+    );
+    // An edit that sends the column unchanged must not be refused: the line edit
+    // form always posts the product, the unit and the part.
+    expect(componentBookingsSql).toContain(
+      "new.component_id is not distinct from old.component_id",
+    );
+  });
+
+  it("keeps both guards away from every client role", () => {
+    for (const fn of [
+      "public.booking_line_items_component_guard()",
+      "public.asset_components_booking_guard()",
+    ]) {
+      expect(componentBookingsSql).toContain(
+        `revoke all on function ${fn} from public, anon, authenticated;`,
+      );
+    }
+  });
+
+  it("is applied after both tables it touches", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101002000_component_bookings.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001800_asset_components.sql"),
+    );
+    expect(
+      MIGRATION_FILES.indexOf("20260101002000_component_bookings.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001300_bookings.sql"),
     );
   });
 });

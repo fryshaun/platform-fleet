@@ -156,12 +156,28 @@ The screens for this stage — `/assets/kinds` and the components card on a unit
 land with the other screens in the final gate, so the rules and the schema are
 reviewed before anything is drawn on top of them.
 
+**Stage 4 — components on a booking line**
+
+- Migration 20: `booking_line_items.component_id` with a composite FK
+  (`on delete set null (component_id)`), `booking_line_items_one_holder`
+  (`component_id is null or asset_id is null`), the partial exclusion constraint
+  on `component_id`, `booking_line_items_component_guard` and
+  `asset_components_booking_guard`.
+- `lib/supabase/types.ts`: the new column on all three shapes.
+- Tests: the `components on a booking line` block in `tests/db/schema.test.ts`.
+
+The two guards are complements — a part may be booked only while un-fitted, and
+may be fitted only while un-booked — so the third case the plan listed,
+"a unit cannot be booked while it carries a booked component", cannot arise and
+is deliberately not written. Unreachable code that looks like a guarantee is
+worse than a sentence saying why it is unnecessary.
+
 ## Not yet
 
-Stage 4 onward: `booking_line_items.component_id` and its partial exclusion
-constraint, `asset_usage_logs`, `component_service_events` and
-`component_service_status`; the `asset_status` enum change; the screens listed
-above. Also still out: the renter-facing API, renter email, deposits.
+Stage 5 onward: `asset_usage_logs`, `component_service_events` and
+`component_service_status`; the `asset_status` enum change; the screens for
+stages 3–4 (`/assets/kinds`, the components card, the component line on a
+booking). Also still out: the renter-facing API, renter email, deposits.
 
 ## Order of work
 
