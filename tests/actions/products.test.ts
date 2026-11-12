@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { MemberRole } from "@/lib/supabase/types";
+import type { MemberRole, SubscriptionStatus } from "@/lib/supabase/types";
+
+import { READ_ONLY_MESSAGE } from "@/lib/billing/entitlements";
 
 import {
   COMPANY_ID,
@@ -56,15 +58,19 @@ const {
 } = await import("@/lib/actions/products");
 
 /**
- * The section is on and the caller manages the shop unless a test says
- * otherwise; `handlers` supplies only the tables the action under test reads.
+ * The section is on, the workspace is paying and the caller manages the shop
+ * unless a test says otherwise; `handlers` supplies only the tables the action
+ * under test reads.
  */
 function setup(
   role: MemberRole = "manager",
   handlers: Record<string, TableHandler> = {},
   sections: string[] = ["products"],
 ) {
-  return tenantSetup(serverMock.createClient, handlers, role, { sections });
+  return tenantSetup(serverMock.createClient, handlers, role, {
+    sections,
+    subscription: "active",
+  });
 }
 
 /** The same setup, for a workspace started in a currency other than dollars. */
@@ -73,7 +79,11 @@ function setupIn(currency: string, role: MemberRole = "manager") {
     serverMock.createClient,
     {
       companies: () => ({
-        data: companyRow({ enabled_sections: ["products"], currency }),
+        data: companyRow({
+          enabled_sections: ["products"],
+          currency,
+          subscription_status: "active",
+        }),
         error: null,
       }),
     },
@@ -943,5 +953,71 @@ describe("removeProductMedia", () => {
 
     expect(mock.methodsFor("product_media")).toContain("delete");
     expect(redirectParams(url).get("ok")).toBe("Removed from the gallery.");
+  });
+});
+
+
+describe("a read-only workspace", () => {
+  /** A lapsed subscription with everything else about the request valid. */
+  function readOnlySetup(status: SubscriptionStatus = "canceled") {
+    return tenantSetup(serverMock.createClient, {}, "owner", {
+      sections: ["products"],
+      subscription: status,
+    });
+  }
+
+  it.each(["none", "canceled", "unpaid"] as const)(
+    "refuses a product write when the status is %s",
+    async (status) => {
+      const mock = readOnlySetup(status);
+
+      const url = await captureRedirect(() => createProduct(formDataOf(DRAFT)));
+
+      expect(redirectPath(url)).toBe("/acme/products");
+      expect(redirectParams(url).get("error")).toBe(READ_ONLY_MESSAGE);
+      // Nothing reached the table. RLS would drop an update without a word, so
+      // the guard has to be what answers — this is the assertion that notices if
+      // the order of the checks ever changes.
+      expect(mock.methodsFor("products")).toEqual([]);
+    },
+  );
+
+  it("keeps dunning writable, because Stripe can still recover it", async () => {
+    const mock = readOnlySetup("past_due");
+
+    const url = await captureRedirect(() => createProduct(formDataOf(DRAFT)));
+
+    expect(mock.methodsFor("products")).toContain("insert");
+    expect(redirectParams(url).get("ok")).toBe("Added Espresso Beans.");
+  });
+
+  it("answers the gallery uploader inline instead of redirecting", async () => {
+    // These two are awaited by the client uploader, so they cannot redirect: a
+    // refusal is a message, not a page.
+    readOnlySetup();
+
+    await expect(
+      createMediaUploadUrl({
+        slug: "acme",
+        productId: PRODUCT_ID,
+        contentType: "image/png",
+        size: 1024,
+      }),
+    ).resolves.toEqual({ ok: false, message: READ_ONLY_MESSAGE });
+  });
+
+  it("refuses to record an upload that already landed in the bucket", async () => {
+    const mock = readOnlySetup();
+
+    await expect(
+      recordMediaUpload({
+        slug: "acme",
+        productId: PRODUCT_ID,
+        path: `${COMPANY_ID}/${PRODUCT_ID}/photo.png`,
+        contentType: "image/png",
+      }),
+    ).resolves.toEqual({ ok: false, message: READ_ONLY_MESSAGE });
+
+    expect(mock.methodsFor("product_media")).toEqual([]);
   });
 });

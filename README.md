@@ -166,6 +166,32 @@ pnpm dev
    `auth.users.encrypted_password` is set. It needs the recovery-codes toggle in
    the dashboard too — see **Two-factor authentication** below.
 
+   `20260101001000_company_billing_guard.sql` takes the columns that decide what
+   a workspace pays off a signed-in session — `stripe_customer_id`,
+   `stripe_subscription_id`, `subscription_status`, `trial_ends_at` on
+   `companies`, and `email` on `profiles` — with a column-level grant plus a
+   `before update` trigger, because a row-level policy cannot narrow a column.
+   It also closes the neighbouring table-wide writes: `companies` loses `insert`
+   and `delete`, `profiles` loses `delete`, and `company_members` keeps only
+   `update (role)`. Each row-level policy in the first migration assumed those
+   grants were narrower than they are; this file is the grant half.
+
+   `20260101001100_subscription_write_gate.sql` is the paywall, and it is narrow
+   on purpose. Reads are never gated — nothing a workspace stored disappears
+   because a card expired — and the write gate covers only what a subscription
+   pays for: `products`, `product_categories`, `product_media`, `product_dates`
+   and `assets`, plus the `product-media` bucket the gallery lives in. Each of
+   the five tables gains a *restrictive* `insert`/`update`/`delete` policy that
+   ANDs `public.has_active_subscription(company_id)` onto the existing role
+   checks; the bucket policies are re-created with the same predicate beside
+   their `bucket_id` and role checks, because a restrictive policy on
+   `storage.objects` would freeze every bucket in the table. `companies`,
+   `profiles`, `company_members`, Settings → Billing, the logo and the avatar
+   stay writable: fixing the card and leaving the workspace are exactly what a
+   lapsed workspace must still be able to do. What counts as live here is
+   `active`, `trialing` and `past_due` — see **Writes need a live subscription**
+   under **Architecture notes**.
+
    A feature module adds its own numbered migration; it never edits the ones
    before it.
 
@@ -175,6 +201,11 @@ pnpm dev
    The retired `anon` and `service_role` keys are still read as a fallback so an
    existing environment keeps working until it is rotated; using one logs a
    deprecation warning, and Supabase stops accepting them in 2027.
+
+   The secret key is not optional for billing: the onboarding insert, the
+   `stripe_customer_id` the checkout records, and both webhook writes all run as
+   the service role, so a deployment without it takes no payments even though it
+   boots and renders fine.
 
 #### Google sign-ins and `431 Request Header Fields Too Large`
 
@@ -281,6 +312,14 @@ Two constraints are worth knowing:
   alone.
 - Vercel functions have no static egress IPs, so an IP-restricted access policy
   on the key breaks deployments. Use least privilege plus rotation instead.
+- **A stored customer id is auditable, not merely trusted.**
+  `node scripts/audit-stripe-customers.mjs` reads every non-null
+  `companies.stripe_customer_id` back from Stripe and prints the ones that are
+  deleted, unreadable, or stamped for another workspace — exiting non-zero if
+  there are any, and reading `.env.local` (or the exported variables) rather than
+  taking arguments. It never writes, because a checkout now *self-heals* such a
+  row by creating a fresh customer, and a silent repair is exactly how those rows
+  become duplicates in the Dashboard nobody can explain.
 
 ### 3. Run
 
@@ -834,11 +873,11 @@ which is request-scoped.
   `check (>= 0)`, and `currency` is a three-letter lowercase code.
 - **The billing columns belong to the webhook.** `subscription_status`,
   `stripe_customer_id`, `stripe_subscription_id` and `trial_ends_at` are revoked
-  from `anon` and `authenticated` and granted back to `service_role` alone, and
+  from `anon` and `authenticated`, so no client role is granted them, and
   `companies_guard_billing_columns()` refuses a signed-in session that tries to
-  move them. `companies_update_admin` is row-level only, so without that guard an
-  owner or admin could point their workspace at another customer's id — one
-  `openBillingPortal` would then open, and one
+  move them anyway. `companies_update_admin` is row-level only, so without that
+  guard an owner or admin could point their workspace at another customer's id —
+  one `openBillingPortal` would then open, and one
   `reconcileCompanySubscription()` would launder into a trusted
   `subscription_status`. The identity columns stay writable, because those are
   the workspace, not the money: `(name, currency, badge, logo_url,
@@ -849,6 +888,26 @@ which is request-scoped.
   `metadata.company_id` — or, for a customer created before that stamp existed,
   `metadata.company_slug` — is not this workspace's. Onboarding stamps
   `company_id` on the customer as soon as the company row has an id to carry it.
+  `startSubscriptionCheckout` asks the same question through
+  `lib/billing/customer.ts`, and differs only in what it does with a row that
+  fails it: a checkout bound to a stranger's customer would offer *their* saved
+  card, so the id is dropped, a customer of this workspace's own is created, and
+  the new id is recorded with the service role. That self-heals a row a session
+  repointed before the guard existed. A *read* that fails says nothing about
+  ownership, so that case answers with an error instead of creating a second
+  customer.
+- **A workspace row cannot be created or deleted from a session.**
+  `companies` loses `insert, delete` and `profiles` loses `delete` from `anon`
+  and `authenticated`. The row that owns a subscription is not something a
+  browser may remove — Stripe would keep charging a customer whose workspace no
+  longer exists — and a profile is written by the `auth.users` trigger, so a
+  client delete would strand every membership at it. Onboarding's insert and its
+  rollback both run as the service role.
+- **A membership row exposes only `role`.** `company_members` grants
+  `update (role)` rather than the table-wide verb, so `user_id` and
+  `accepted_at` cannot be rewritten by an owner or admin: accepting an
+  invitation is the colleague's own act, and it happens inside
+  `respond_to_company_invitation()` / `accept_company_invitations()`.
 - **A user's own row exposes the display name and the photo.** `profiles` grants
   `(full_name, avatar_url)` and nothing else, so the address the team roster
   renders cannot be rewritten by the user it belongs to.
@@ -940,14 +999,21 @@ breaks every other project on the same port.
   the header (Vercel) that is sufficient. Serving Node directly from the internet
   needs a hostname allowlist on top — the deployment knows its own domains via
   `NEXT_PUBLIC_SITE_URL` and `VERCEL_*`, and this is the point to add it.
-- **Subscription state is not a paywall.** `hasLiveSubscription` decides which
-  billing buttons a page shows and nothing else: a workspace whose subscription
-  has lapsed keeps full read and write access to its data, and every section
-  switch keeps working. Making it a paywall means deciding what a lapsed
-  workspace may still see — a product decision, not a fix — and it has to be
-  enforced in Postgres like everything else, because the browser holds the
-  publishable key. Until then, "canceled" changes what you are billed, not what
-  you can reach.
+- **A lapsed subscription is read-only, not a lockout.** `20260101001100` closes
+  content writes for `none`, `canceled`, `unpaid`, `incomplete`,
+  `incomplete_expired` and `paused`, and everything that repairs a workspace —
+  Settings, billing, the team, the account — stays open. `past_due` keeps
+  writing because Stripe can put the subscription back to `active` by itself.
+  Three things follow. `none` is read-only because onboarding ends at Stripe
+  Checkout, so a workspace cannot reach the app without paying first. The gate
+  is enforced in Postgres *and* asked again by
+  `requireWritableWorkspace()` — RLS decides, the action explains, because a
+  failed `using` on update or delete is otherwise a silent zero rows. And it
+  reads the status *stored* on `companies`: reconciliation only runs from the
+  dashboard and the billing pages, so a webhook that never arrived can leave a
+  workspace writable or read-only until somebody opens one of those pages.
+  Nothing here gates *reads*: the catalogue and the fleet stay visible, which is
+  why the pages show a banner rather than a redirect.
 
 ## Architecture notes
 
@@ -1010,6 +1076,17 @@ breaks every other project on the same port.
   re-reads Stripe from the pages that display the subscription. Both share
   `toSubscriptionPatch`, so the two paths cannot disagree about what a
   subscription means.
+- **`lib/billing/entitlements.ts`** answers a third billing question, and it is
+  neither of the other two: `hasLiveSubscription()` asks whether Stripe still
+  holds a subscription the portal can repair, `isSectionEnabled()` asks whether
+  the workspace bought an extension, and `isWorkspaceWritable()` asks whether it
+  may change what it stores *right now*. The answer is
+  `WRITABLE_STATUSES` — `active`, `trialing`, `past_due` — and the
+  complement is read-only. `tests/db/schema.test.ts` reads the SQL and fails if
+  the two lists drift, so the page banner, the action gate and the restrictive
+  policies cannot disagree. `READ_ONLY_MESSAGE` lives here as well: the Server
+  Action's error and `components/billing/read-only-notice.tsx` use the same
+  sentence, because a reader should not meet two phrasings of one rule.
 - **Tenancy and invitation helpers** (`is_company_member`, `has_company_role`,
   `current_member_role`, `shares_company_with`, `accept_company_invitations`,
   `my_pending_invitations`, `respond_to_company_invitation`)
@@ -1070,6 +1147,7 @@ components/
   tenant/company-mark.tsx        # logo → badge → initials, in the rail and the chooser
   tenant/company-logo-uploader.tsx # signed upload to the company-logos bucket
   tenant/form-sheet.tsx          # the shared "new …" slideout
+  billing/read-only-notice.tsx   # the banner a lapsed workspace sees on content pages
 lib/
   auth.ts                        # session + tenancy data access layer
   account.ts                     # name, password and avatar rules (client-safe)
@@ -1085,7 +1163,7 @@ lib/
   product-media.ts               # first image per product, one query per page
   roles.ts                       # labels + authorization predicates (client-safe)
   safe-redirect.ts               # post-login `next` validation (client-safe)
-  billing/{checkout,sync}.ts     # Checkout payloads + subscription reconciliation
+  billing/{checkout,customer,entitlements,sync}.ts # Checkout payloads, customer ownership, write gate, reconciliation
   plans.ts                       # plan shape, filters and formatting (client-safe)
   slug.ts                        # shared reserved segments and slug rules
   site.ts                        # request origin (validated Host + configured URL)
@@ -1093,8 +1171,9 @@ lib/
   supabase/{client,server,admin,proxy,env,env.server}.ts
   actions/{account,auth,billing,company,members,mfa,products,settings,support}.ts
   actions/assets.ts              # asset writes, with the front-desk status gate
-supabase/migrations/             # schema + RLS (seven files)
+supabase/migrations/             # schema + RLS (nine files)
 tests/                           # unit, actions, api, integration, db
+scripts/                         # operator tools, read-only (Stripe customer audit)
 ```
 
 ## Adding a new section
@@ -1145,6 +1224,17 @@ runnable:
    well. Migration 03 does this throughout, and the switch then hides rows
    instead of deleting them. `tests/db/schema.test.ts` fails if any policy in a
    module migration forgets it.
+
+   A fifth rule applies if the section stores what a subscription pays for, as
+   the catalogue and the fleet do: the table belongs in
+   `20260101001100_subscription_write_gate.sql` too, with a *restrictive*
+   `insert`, `update` and `delete` policy calling
+   `public.has_active_subscription(company_id)`, and the section's write actions
+   call `requireWritableWorkspace()`. That migration names its tables explicitly
+   and `tests/db/schema.test.ts` checks that list, so a new module has to add
+   itself — the point of the explicit list is that nobody's data goes read-only
+   because a migration guessed. Leave reads and the carve-outs (`companies`,
+   `profiles`, `company_members`, the avatar and logo buckets) alone.
 
    If one of your tables references another, key the reference on the tenant as
    well — `foreign key (company_id, customer_id) references ... (company_id, id)`

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
+import { ReadOnlyNotice } from "@/components/billing/read-only-notice";
 import { FormMessage } from "@/components/form-message";
 import { FormSheet } from "@/components/tenant/form-sheet";
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
@@ -18,9 +19,10 @@ import {
   summariseAssets,
 } from "@/lib/assets";
 import { getTenantContext } from "@/lib/auth";
+import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import { firstImagePerProduct } from "@/lib/product-media";
-import { canManage } from "@/lib/roles";
+import { canAdminister, canManage } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
 import { createClient } from "@/lib/supabase/server";
 
@@ -127,7 +129,12 @@ async function AssetsContent({
     assets.map((asset) => asset.product_id),
   );
 
-  const canEdit = canManage(role);
+  // The fleet stays on screen when a subscription lapses — reads are never
+  // gated — but the create affordances go with the writes: `canEdit` is what
+  // the header action and the empty state check, so nothing offers a form whose
+  // action would refuse it. The banner says why.
+  const writable = isWorkspaceWritable(company.subscription_status);
+  const canEdit = canManage(role) && writable;
   const filtered = Boolean(status);
   const productTitles = new Map(
     products.map((product) => [product.id, product.title]),
@@ -177,6 +184,13 @@ async function AssetsContent({
           ) : undefined
         }
       />
+
+      {writable ? null : (
+        <ReadOnlyNotice
+          slug={company.slug}
+          canManageBilling={canAdminister(role)}
+        />
+      )}
 
       <FormMessage
         error={readParam(query.error)}

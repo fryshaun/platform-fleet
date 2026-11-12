@@ -252,6 +252,13 @@ describe("startSubscriptionCheckout", () => {
 
   beforeEach(() => {
     stripeMock.customersCreate.mockReset();
+    stripeMock.customersRetrieve.mockReset();
+    // The fixture company owns the customer it points at; a test that wants the
+    // ownership proof to fail overrides this.
+    stripeMock.customersRetrieve.mockResolvedValue({
+      id: "cus_test_123",
+      metadata: { company_id: COMPANY_ID },
+    });
     stripeMock.sessionsCreate.mockReset();
     plansMock.findSubscriptionPlan.mockReset();
     adminMock.createAdminClient.mockReset();
@@ -510,6 +517,113 @@ describe("startSubscriptionCheckout", () => {
     expect(redirectParams(url).get("error")).toBe(
       "Stripe did not return a checkout URL.",
     );
+  });
+
+  it("discards a customer that belongs to another workspace", async () => {
+    tenantSetup(serverMock.createClient, {
+      companies: () => ({
+        data: companyRow({ stripe_customer_id: "cus_other" }),
+        error: null,
+      }),
+    });
+    stripeMock.customersRetrieve.mockResolvedValue({
+      id: "cus_other",
+      metadata: { company_id: "company-2" },
+    });
+
+    await captureRedirect(() => startSubscriptionCheckout(checkoutForm()));
+
+    // A session bound to the foreign id would offer that customer's saved card,
+    // so the id is dropped and a customer of this workspace's own is created.
+    expect(stripeMock.customersCreate).toHaveBeenCalledTimes(1);
+    expect(admin.argsFor("companies", "update")).toEqual([
+      [{ stripe_customer_id: "cus_new" }],
+    ]);
+    expect(stripeMock.sessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_new" }),
+    );
+  });
+
+  it("discards a customer Stripe reports as deleted", async () => {
+    tenantSetup(serverMock.createClient, {
+      companies: () => ({
+        data: companyRow({ stripe_customer_id: "cus_gone" }),
+        error: null,
+      }),
+    });
+    stripeMock.customersRetrieve.mockResolvedValue({
+      id: "cus_gone",
+      deleted: true,
+    });
+
+    await captureRedirect(() => startSubscriptionCheckout(checkoutForm()));
+
+    expect(admin.argsFor("companies", "update")).toEqual([
+      [{ stripe_customer_id: "cus_new" }],
+    ]);
+    expect(stripeMock.sessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_new" }),
+    );
+  });
+
+  it("keeps a customer from onboarding, which carries the slug", async () => {
+    tenantSetup(serverMock.createClient, {
+      companies: () => ({
+        data: companyRow({ stripe_customer_id: "cus_legacy" }),
+        error: null,
+      }),
+    });
+    stripeMock.customersRetrieve.mockResolvedValue({
+      id: "cus_legacy",
+      metadata: { company_slug: "acme", owner_user_id: "user-1" },
+    });
+
+    await captureRedirect(() => startSubscriptionCheckout(checkoutForm()));
+
+    expect(stripeMock.customersCreate).not.toHaveBeenCalled();
+    expect(admin.argsFor("companies", "update")).toEqual([]);
+    expect(stripeMock.sessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_legacy" }),
+    );
+  });
+
+  it("discards a customer stamped for a different slug", async () => {
+    tenantSetup(serverMock.createClient, {
+      companies: () => ({
+        data: companyRow({ stripe_customer_id: "cus_slug" }),
+        error: null,
+      }),
+    });
+    stripeMock.customersRetrieve.mockResolvedValue({
+      id: "cus_slug",
+      metadata: { company_slug: "elsewhere" },
+    });
+
+    await captureRedirect(() => startSubscriptionCheckout(checkoutForm()));
+
+    expect(stripeMock.customersCreate).toHaveBeenCalledTimes(1);
+    expect(stripeMock.sessionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_new" }),
+    );
+  });
+
+  it("answers instead of duplicating a customer Stripe will not read", async () => {
+    tenantSetup(serverMock.createClient);
+    stripeMock.customersRetrieve.mockRejectedValue(
+      new Error("No such customer"),
+    );
+
+    const url = await captureRedirect(() =>
+      startSubscriptionCheckout(checkoutForm()),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "We could not check this workspace's billing account just now. Please try again.",
+    );
+    // A read that failed says nothing about whether the id is right, so no
+    // second customer is created on the strength of it.
+    expect(stripeMock.customersCreate).not.toHaveBeenCalled();
+    expect(stripeMock.sessionsCreate).not.toHaveBeenCalled();
   });
 });
 

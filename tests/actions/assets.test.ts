@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { MemberRole } from "@/lib/supabase/types";
+import type { MemberRole, SubscriptionStatus } from "@/lib/supabase/types";
+
+import { READ_ONLY_MESSAGE } from "@/lib/billing/entitlements";
 
 import { ASSET_ID, COMPANY_ID, formDataOf, PRODUCT_ID } from "../helpers/fixtures";
 import {
@@ -39,15 +41,19 @@ const { createAsset, deleteAsset, setAssetStatus, updateAsset } = await import(
 );
 
 /**
- * The section is on and the caller manages the fleet unless a test says
- * otherwise; `handlers` supplies only the tables the action under test reads.
+ * The section is on, the workspace is paying and the caller manages the fleet
+ * unless a test says otherwise; `handlers` supplies only the tables the action
+ * under test reads.
  */
 function setup(
   role: MemberRole = "manager",
   handlers: Record<string, TableHandler> = {},
   sections: string[] = ["assets"],
 ) {
-  return tenantSetup(serverMock.createClient, handlers, role, { sections });
+  return tenantSetup(serverMock.createClient, handlers, role, {
+    sections,
+    subscription: "active",
+  });
 }
 
 /** The smallest valid asset form. */
@@ -384,3 +390,72 @@ describe("deleteAsset", () => {
   });
 });
 
+
+
+describe("a read-only workspace", () => {
+  /** A lapsed subscription with everything else about the request valid. */
+  function readOnlySetup(
+    status: SubscriptionStatus = "canceled",
+    role: MemberRole = "manager",
+  ) {
+    return tenantSetup(serverMock.createClient, {}, role, {
+      sections: ["assets"],
+      subscription: status,
+    });
+  }
+
+  it("refuses the manager's edits", async () => {
+    const mock = readOnlySetup();
+
+    const url = await captureRedirect(() =>
+      updateAsset(formDataOf({ ...DRAFT, asset_id: ASSET_ID })),
+    );
+
+    expect(redirectPath(url)).toBe("/acme/assets");
+    expect(redirectParams(url).get("error")).toBe(READ_ONLY_MESSAGE);
+    expect(mock.methodsFor("assets")).toEqual([]);
+  });
+
+  it("closes the front desk's status change too", async () => {
+    // The tier differs on purpose — moving a unit is front-desk work — but the
+    // paywall is not a role, so it stops that write as well.
+    const mock = readOnlySetup("unpaid", "staff");
+
+    const url = await captureRedirect(() =>
+      setAssetStatus(
+        formDataOf({ slug: "acme", asset_id: ASSET_ID, status: "retired" }),
+      ),
+    );
+
+    expect(redirectPath(url)).toBe("/acme/assets");
+    expect(redirectParams(url).get("error")).toBe(READ_ONLY_MESSAGE);
+    expect(mock.methodsFor("assets")).toEqual([]);
+  });
+
+  it("keeps dunning writable, because Stripe can still recover it", async () => {
+    const mock = readOnlySetup("past_due", "staff");
+
+    const url = await captureRedirect(() =>
+      setAssetStatus(
+        formDataOf({ slug: "acme", asset_id: ASSET_ID, status: "maintenance" }),
+      ),
+    );
+
+    expect(mock.methodsFor("assets")).toContain("update");
+    expect(redirectParams(url).get("ok")).toBe("Marked out of action.");
+  });
+
+  it("refuses to delete a unit", async () => {
+    // Retiring and deleting are both content, so both close. Leaving the
+    // *workspace* is a different table — `companies` — and stays open, which is
+    // the carve-out the migration documents.
+    const mock = readOnlySetup();
+
+    const url = await captureRedirect(() =>
+      deleteAsset(formDataOf({ slug: "acme", asset_id: ASSET_ID })),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(READ_ONLY_MESSAGE);
+    expect(mock.methodsFor("assets")).toEqual([]);
+  });
+});

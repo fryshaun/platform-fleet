@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import { getTenantContext } from "@/lib/auth";
+import {
+  isWorkspaceWritable,
+  READ_ONLY_MESSAGE,
+} from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
 import { canManage } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
@@ -43,6 +47,14 @@ async function NewProductContent({
   // to do here, and the action refuses the write regardless.
   if (!isSectionEnabled(company, "products") || !canManage(role)) {
     notFound();
+  }
+
+  // A read-only workspace has nothing to create here either, but a 404 would be
+  // a lie. Send it to the catalogue, where the banner explains the freeze.
+  if (!isWorkspaceWritable(company.subscription_status)) {
+    redirect(
+      `/${company.slug}/products?error=${encodeURIComponent(READ_ONLY_MESSAGE)}`,
+    );
   }
 
   const supabase = await createClient();

@@ -13,6 +13,8 @@ import type {
   SubscriptionStatus,
 } from "@/lib/supabase/types";
 
+import { WRITABLE_STATUSES } from "@/lib/billing/entitlements";
+
 /**
  * Static guards over the SQL migrations.
  *
@@ -35,6 +37,7 @@ const MIGRATION_FILES = [
   "20260101000500_company_identity.sql",
   "20260101000900_two_factor.sql",
   "20260101001000_company_billing_guard.sql",
+  "20260101001100_subscription_write_gate.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -51,6 +54,9 @@ const twoFactorSql = readMigration("20260101000900_two_factor.sql");
 const billingGuardSql = readMigration(
   "20260101001000_company_billing_guard.sql",
 );
+const subscriptionGateSql = readMigration(
+  "20260101001100_subscription_write_gate.sql",
+);
 const allSql = [
   accountsSql,
   invitationSql,
@@ -60,6 +66,7 @@ const allSql = [
   identitySql,
   twoFactorSql,
   billingGuardSql,
+  subscriptionGateSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -1044,11 +1051,288 @@ describe("billing column guard", () => {
     );
   });
 
+  it("pins its search_path, so a caller cannot redirect what the body resolves", () => {
+    // The body calls `auth.role()` schema-qualified and nothing else that lives
+    // outside `pg_catalog`, which is why an empty path is the right one.
+    expect(billingGuardSql).toContain("set search_path = ''");
+  });
+
   it("is applied after the columns it protects exist", () => {
     expect(
       MIGRATION_FILES.indexOf("20260101001000_company_billing_guard.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101000000_accounts_and_companies.sql"),
+    );
+  });
+});
+
+describe("the rows a session may not write at all", () => {
+  it("keeps a company row from being created or deleted by a session", () => {
+    // `companies_delete_owner` is row-level, and a row deleted while its
+    // subscription is live leaves Stripe charging a customer whose workspace is
+    // gone. Onboarding's rollback and its only insert both use the service role.
+    expect(billingGuardSql).toContain(
+      "revoke insert, delete on public.companies from anon, authenticated;",
+    );
+  });
+
+  it("keeps a profile row from being deleted by the user it belongs to", () => {
+    // The row is written by `handle_new_user()` on the auth insert, so a client
+    // delete leaves every membership pointing at an id nothing can restore.
+    expect(billingGuardSql).toContain(
+      "revoke delete on public.profiles from anon, authenticated;",
+    );
+  });
+
+  it("leaves a membership only its role writable", () => {
+    // `company_members_update_assignable` constrains `company_id` and the role
+    // values, but not `user_id` or `accepted_at`: with the table-wide grant an
+    // admin could add somebody who never accepted an invitation, or accept on
+    // their behalf.
+    expect(billingGuardSql).toContain(
+      "revoke update on public.company_members from anon, authenticated;",
+    );
+    expect(billingGuardSql).toContain(
+      "grant update (role) on public.company_members to authenticated;",
+    );
+  });
+});
+
+describe("the subscription write gate", () => {
+  /**
+   * The five tables a subscription pays for. `companies`, `profiles` and
+   * `company_members` are deliberately absent: they are how a lapsed workspace
+   * fixes its card, its team and its own account, and how it leaves.
+   */
+  const GATED_TABLES = [
+    "products",
+    "product_categories",
+    "product_media",
+    "product_dates",
+    "assets",
+  ] as const;
+
+  const CARVED_OUT = ["companies", "profiles", "company_members"] as const;
+
+  /** One policy, from `create policy` to the semicolon that ends it. */
+  function policyFor(begin: string): string | undefined {
+    return subscriptionGateSql.match(new RegExp(`${begin}[\\s\\S]*?;`))?.[0];
+  }
+
+  /** The members of an enum, read out of its `create type` statement. */
+  function enumMembers(name: string): string[] {
+    const body = accountsSql.match(
+      new RegExp(`create type public\\.${name} as enum \\(([\\s\\S]*?)\\);`),
+    )?.[1];
+
+    return [...(body ?? "").matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+  }
+
+  it("answers with a definer helper, so a policy never depends on the caller", () => {
+    // Same shape as `has_company_section`: a policy on `products` must not care
+    // whether the caller can read the row in `companies` it asks about.
+    expect(subscriptionGateSql).toContain(
+      "create or replace function public.has_active_subscription(",
+    );
+    expect(subscriptionGateSql).toContain("security definer");
+    expect(subscriptionGateSql).toContain("set search_path = ''");
+    expect(subscriptionGateSql).toContain("stable");
+    expect(subscriptionGateSql).toContain("from public.companies c");
+  });
+
+  it("is callable by a session, by the webhook and by nobody else", () => {
+    expect(subscriptionGateSql).toContain(
+      "revoke all on function public.has_active_subscription(uuid) from public, anon;",
+    );
+    expect(subscriptionGateSql).toContain(
+      "grant execute on function public.has_active_subscription(uuid) to authenticated, service_role;",
+    );
+  });
+
+  it("reads the statuses the actions treat as writable", () => {
+    // The drift that would hurt: a status the action allows and the policy
+    // refuses is a write that fails silently, and the other way round is a
+    // paywall that does not hold.
+    const list =
+      subscriptionGateSql.match(/subscription_status in \(([^)]*)\)/)?.[1] ?? "";
+    const statuses = [...list.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]);
+
+    expect(statuses).toEqual([...WRITABLE_STATUSES]);
+  });
+
+  it("classifies every status in the column, so a new one cannot slip past", () => {
+    const declared = enumMembers("subscription_status");
+    const writable = new Set<string>(WRITABLE_STATUSES);
+
+    expect(declared.length).toBe(9);
+    // A member that lands in neither list is one nobody decided about, which is
+    // exactly when this test should fail and a person should think.
+    expect(declared.filter((status) => !writable.has(status)).sort()).toEqual([
+      "canceled",
+      "incomplete",
+      "incomplete_expired",
+      "none",
+      "paused",
+      "unpaid",
+    ]);
+  });
+
+  it.each(GATED_TABLES)(
+    "gates every write to %s with a restrictive policy",
+    (table) => {
+      for (const command of ["insert", "update", "delete"] as const) {
+        const body = policyFor(
+          `create policy "${table}_${command}_live_subscription"`,
+        );
+
+        expect({ table, command, gated: Boolean(body) }).toEqual({
+          table,
+          command,
+          gated: true,
+        });
+        // Restrictive policies are ANDed onto every permissive one, so this is
+        // the single place the paywall is stated for the table.
+        expect(body).toContain("as restrictive");
+        expect(body).toContain("public.has_active_subscription(company_id)");
+        expect(body).toContain("to authenticated");
+      }
+    },
+  );
+
+  it("leaves reads alone, so a lapsed workspace still shows its data", () => {
+    expect(subscriptionGateSql).not.toContain("as restrictive for select");
+    // Not `for all` either: that form's `using` clause filters reads too.
+    expect(subscriptionGateSql).not.toContain("as restrictive for all");
+  });
+
+  it("keeps the tables a workspace repairs itself with out of the gate", () => {
+    for (const table of CARVED_OUT) {
+      expect(subscriptionGateSql).not.toContain(`on public.${table}`);
+    }
+  });
+
+  it("closes the gallery bucket beside the checks it already carried", () => {
+    for (const command of ["insert", "update", "delete"] as const) {
+      const body = policyFor(`create policy "product_media_objects_${command}"`);
+
+      // Re-created in full, so losing a predicate while adding one is the
+      // mistake this test exists to catch.
+      expect(body).toContain("bucket_id = 'product-media'");
+      expect(body).toContain("public.has_company_role(");
+      expect(body).toContain(
+        "public.has_company_section(public.storage_company_id(name), 'products')",
+      );
+      expect(body).toContain(
+        "public.has_active_subscription(public.storage_company_id(name))",
+      );
+    }
+  });
+
+  it("leaves the buckets settings still writes out of it", () => {
+    // A restrictive policy on `storage.objects` would apply to every bucket in
+    // the table — freezing the logo and avatar uploads for the one workspace
+    // whose job is to fix its card.
+    expect(subscriptionGateSql).not.toContain("company_logos_objects_");
+    expect(subscriptionGateSql).not.toContain("avatars_objects_");
+    // Select is what renders the gallery; it keeps working.
+    expect(subscriptionGateSql).not.toContain(
+      'create policy "product_media_objects_select"',
+    );
+  });
+
+  it("is applied after the columns it reads are protected", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001100_subscription_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001000_company_billing_guard.sql"),
+    );
+  });
+});
+
+const ACTIONS_DIR = fileURLToPath(new URL("../../lib/actions/", import.meta.url));
+
+function readAction(name: string): string {
+  return readFileSync(`${ACTIONS_DIR}${name}`, "utf8");
+}
+
+/** Every `.from(table).update({...})` payload an action sends from a session. */
+function sessionWrites(name: string) {
+  const writes: { file: string; table: string; columns: string[] }[] = [];
+
+  for (const match of readAction(name).matchAll(
+    /\.from\("(companies|profiles)"\)\s*\.update\(\{([^}]*)\}\)/g,
+  )) {
+    writes.push({
+      file: name,
+      table: match[1],
+      columns: match[2]
+        .split(",")
+        .map((entry) => entry.split(":")[0].trim())
+        .filter(Boolean),
+    });
+  }
+
+  return writes;
+}
+
+const sessionUpdates = [
+  ...sessionWrites("settings.ts"),
+  ...sessionWrites("company.ts"),
+  ...sessionWrites("account.ts"),
+];
+
+/** The columns the migration grants `update` on, per table. */
+function grantedColumns(table: "companies" | "profiles"): string[] {
+  const statements = billingGuardSql.match(/grant update \([^)]*\)[\s\S]*?;/g) ?? [];
+  const statement = statements.find((entry) =>
+    entry.includes(`on public.${table} to authenticated`),
+  );
+
+  return (statement?.match(/\(([^)]*)\)/)?.[1] ?? "")
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
+}
+
+describe("the session writes fit inside the column grants", () => {
+  /**
+   * The failure this whole file exists to catch: an action writes a column the
+   * grant does not name, and the only symptom is a 403 in production. Reading
+   * the payloads out of the actions is what keeps the two lists in step.
+   */
+  it("finds the payloads it is meant to check", () => {
+    // Otherwise every assertion below could pass by finding nothing at all.
+    expect(sessionUpdates.length).toBeGreaterThanOrEqual(6);
+    expect(grantedColumns("companies")).toContain("logo_url");
+    expect(grantedColumns("profiles")).toEqual(["full_name", "avatar_url"]);
+  });
+
+  for (const table of ["companies", "profiles"] as const) {
+    it(`grants every column a session writes on ${table}`, () => {
+      const granted = grantedColumns(table);
+      const writes = sessionUpdates.filter((write) => write.table === table);
+
+      expect(writes.length).toBeGreaterThan(0);
+
+      for (const write of writes) {
+        for (const column of write.columns) {
+          // Compared as an object so a failure names the file and the column.
+          expect({
+            file: write.file,
+            column,
+            granted: granted.includes(column),
+          }).toEqual({ file: write.file, column, granted: true });
+        }
+      }
+    });
+  }
+
+  it("keeps the service-role billing write out of the payload list", () => {
+    // `billing.ts` writes `stripe_customer_id` with the admin client on purpose,
+    // which is asserted in the action tests. This documents the exclusion: it is
+    // not a session write and must not be granted to one.
+    expect(readAction("billing.ts")).toMatch(
+      /createAdminClient\(\)\s*\.from\("companies"\)\s*\.update\(\{ stripe_customer_id: customerId \}\)/,
     );
   });
 });
