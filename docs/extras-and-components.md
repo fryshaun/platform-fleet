@@ -94,7 +94,8 @@ copied, the rule migration 04 already states for counts.
 
 ## In this slice
 
-Stages 1 and 2. Later stages are under *Not yet* and land in their own commits.
+Stages 1 and 2. Stages 3–7 are under *Stages 3–7 — the screens* and landed in
+their own commits.
 
 **Stage 1 — the catalogue, its scope and the line extras**
 
@@ -202,12 +203,74 @@ worse than a sentence saying why it is unnecessary.
   `tests/db/schema.test.ts`, plus the status tests in `tests/unit/assets.test.ts`
   and the action tests.
 
-## Not yet
+## Stages 3–7 — the screens
 
-The screens for stages 3–7: `/assets/kinds`, the components and service cards on
-a unit, the usage log form, and the "Out on hire" status pill on the fleet page.
-The rules, the schema and the live proofs are done; the pages read them. Also
-still out: the renter-facing API, renter email, deposits.
+The rules, the schema and the live proofs landed first; this is the UI that reads
+them. Four commits and one fix, in order.
+
+**The taxonomy — `/assets/kinds`**
+
+- `lib/components.ts` grew the interval rules: `SERVICE_INTERVAL_UNITS`,
+  `SERVICE_INTERVAL_FIELDS` (the labels, hints and steps the form renders from),
+  `intervalFieldName`, `parseIntervalValue` (empty and `0` both mean "not
+  measured", and both store `null`), `intervalInputValue`, `describeInterval`,
+  `fittedWindowLabel`, `NEW_KIND_FORM_ID`, `NEW_COMPONENT_FORM_ID`.
+  `ComponentKindDraft` and `parseComponentKindDraft` read the three columns —
+  until then the form silently dropped them.
+- `app/[tenant]/assets/kinds/{page,kind-deck,kind-fields}.tsx`: the categories
+  pattern (a deck of forms, a `FormSheet` for the new one, `?ok=`/`?error=`),
+  manager-only, with a read-only workspace redirected to the fleet.
+- `NAV_ICONS.kinds` and a manager-only **Kinds** entry beside Assets in the rail,
+  exactly as Categories sits beside Products.
+- `"kinds"` joined `RESERVED_ASSET_HANDLES`, so no unit can shadow the page.
+
+**The unit page became tabs** — `/assets/[handle]` plus `/components`, `/usage`
+and `/service`.
+
+- `lib/assets.ts`: `ASSET_TABS`, `AssetTab`, `assetTabPath` and
+  `assetTabSegment`, modelled on `SETTINGS_TABS`/`settingsSegment`. Overview is
+  the index (the bare handle), so old links and the fleet list still land.
+- `app/[tenant]/assets/asset-header.tsx`, `asset-tabs.tsx` and
+  `asset-access.ts` (`requireAssetPage`): the header draws the strip and the
+  badges, and the helper answers the four questions every tab asks — section on,
+  unit exists, writable, who may write — so a new tab cannot forget one.
+- **Components**: `components/{page,components-section,component-fields}.tsx`. A
+  row is a form; **Remove** posts `removed_on` through `removeComponent`, and
+  **Delete** is manager-only. Fitting is front-desk work, hence `canFit` beside
+  `canEdit` in `requireAssetPage()`.
+- **Usage**: `lib/usage.ts` (`parseUsageDraft`, `summariseUsage`, `usageSummary`,
+  `formatHours`, `formatDistance`, `NEW_USAGE_FORM_ID`), `lib/actions/usage.ts`
+  (`createUsageLog`, `updateUsageLog`, `deleteUsageLog` — the delete being the
+  manager's), and `usage/{page,usage-section,usage-fields}.tsx`.
+- **Service**: `lib/servicing.ts` (`parseServiceEventDraft`,
+  `serviceStatusLabel`, `serviceStatusRank`, `serviceIntervalLabel`,
+  `serviceProgressLabel`, `statusForComponent`, `serviceEventsForComponent`,
+  `serviceSummary`, `NEW_SERVICE_FORM_ID`), `lib/actions/servicing.ts`
+  (`createServiceEvent`, `deleteServiceEvent`), and
+  `service/{page,service-section,service-fields,service-badge}.tsx`.
+- Tests: `tests/actions/asset-components.test.ts`, `tests/unit/usage.test.ts`,
+  `tests/actions/usage.test.ts`, `tests/unit/servicing.test.ts`,
+  `tests/actions/servicing.test.ts`, and the tab/handle/filter cases in
+  `tests/unit/assets.test.ts`. No screen tests: the repo has no RTL or jsdom, so
+  every rule the screens depend on lives in a `lib/*` module and is tested there.
+
+**The rented state, round the whole UI**
+
+- `ASSET_STATUS_FILTER_OPTIONS` — all four statuses, so a unit out on hire can be
+  found. The edit form and the status buttons keep the settable three.
+- The fleet summary counts `out on hire` separately from `out of action`.
+- `AssetStatusBadge` gives `rented` its own (quiet, filled) pill.
+- The availability card explains a hire's status instead of offering three
+  buttons `setAssetStatus()` would refuse.
+- The edit form shows the status as a fact on a rented unit and posts none, and
+  `updateAsset` reads the stored row first: a status is written only when the
+  form sent one *and* the unit is not out.
+
+**Bookings** — the board's per-booking figure now includes the line extras (it
+was quoting the lines alone while the booking page quoted both), and a line can
+book a single part through `assignComponent` and its picker.
+
+Still out: the renter-facing API, renter email, deposits.
 
 ## Order of work
 
@@ -289,3 +352,45 @@ the next starts.
   staged: the header first, then sections appended at a banner comment, then the
   file re-read to check the order. An `insert_line` at the wrong offset silently
   splits an object literal in half.
+
+### From the screens
+
+- **`component_service_status` coalesces every interval to `0`.** `0` means "not
+  measured this way", so it must never be rendered as "every 0 km". The tab reads
+  the view's numbers through `describeInterval()`, which already says "No interval
+  set" for zeroes, and `serviceIntervalLabel` exists only to say so out loud.
+- **The view has no `kind_id` and no `removed_on`.** A card that needs the kind or
+  the fitted window joins on `component_id` to `asset_components`; reading either
+  from the view would have meant another migration.
+- **A part that came off keeps its row, its history and its view row** — including
+  a status. The Service tab shows the badge only for fitted parts and counts only
+  fitted parts in the summary, because "overdue" on a fork in the parts bin is a
+  false alarm that teaches a shop to ignore the tab.
+- **`parseComponentKindDraft` dropped the intervals for a whole stage.** The
+  columns existed, the view read them, and the form silently wrote none — the
+  draft type was the bug, not the action. A screen that adds fields to a table
+  has to add them to the parser *and* to the fixture expectations.
+- **A redirect must be named, not spelled.** `assetTabSegment(handle, "usage")`
+  builds `assets/<handle>/usage` for `redirectWith`, which prepends the slug. A
+  hand-written path is how a form starts returning to the wrong tab after a
+  rename.
+- **`in("id", [])` is an error, not an empty result.** The unit's Service tab skips
+  both the events query and the board skips the extras query when there is nothing
+  to ask about.
+- **The filter and the form want different lists.** `rented` is readable and not
+  settable: `ASSET_STATUS_FILTER_OPTIONS` offers four, `ASSET_STATUS_OPTIONS`
+  offers three, and `setAssetStatus()` refuses `rented` by name so a forged form
+  gets a sentence.
+- **`updateAsset` could un-rent a unit.** The status select defaulted to
+  "Available" and the action wrote whatever it posted, so saving a name on a
+  rented unit cleared the flag until `refresh_asset_rented()` put it back. The
+  form now posts no status for a rented unit, and the action reads the stored row
+  first — a form is not the authority on a field a trigger owns.
+- **The board quoted the lines only.** The booking page added
+  `bookingAddonsTotal()` and the board did not, so the same hire had two totals.
+  Both now read `booking_line_addons`; the board does it in one query for every
+  visible booking rather than one per card.
+- **`booking_line_items.component_id` is not capacity.** The exclusion constraint
+  is on `asset_id`, so `assignComponent` is a naming write like the rider — it
+  does not call `check_asset_availability()`, and a test asserts the RPC stays
+  untouched.
