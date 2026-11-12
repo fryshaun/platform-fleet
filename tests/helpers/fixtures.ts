@@ -239,6 +239,42 @@ export function componentRow(
   };
 }
 
+/** A reading on the fixture unit's usage log. */
+export const USAGE_LOG_ID = "eeeeeeee-1111-4111-8111-eeeeeeeeeeee";
+
+export function usageLogRow(
+  overrides: Partial<Tables<"asset_usage_logs">> = {},
+): Tables<"asset_usage_logs"> {
+  return {
+    id: USAGE_LOG_ID,
+    company_id: COMPANY_ID,
+    asset_id: ASSET_ID,
+    logged_on: "2026-03-04",
+    hours: 4.25,
+    distance_km: 38,
+    notes: null,
+    created_at: "2026-03-04T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** A service event on the fixture component. */
+export const SERVICE_EVENT_ID = "ffffffff-1111-4111-8111-ffffffffffff";
+
+export function serviceEventRow(
+  overrides: Partial<Tables<"component_service_events">> = {},
+): Tables<"component_service_events"> {
+  return {
+    id: SERVICE_EVENT_ID,
+    company_id: COMPANY_ID,
+    component_id: COMPONENT_ID,
+    serviced_on: "2026-02-01",
+    notes: null,
+    created_at: "2026-02-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 /**
  * A plan as the catalogue hands it to the checkout actions.
  *
