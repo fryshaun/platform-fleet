@@ -123,6 +123,14 @@ Each step ends green before the next starts.
     the constraint, the triggers and the view get exercised against real
     Postgres), then `pnpm verify`.
 
+    Done, and the live run proved: a line copies its window and `blocks_stock`
+    from the booking; an overlapping allocation is refused with `23P01`; an
+    unallocated line never conflicts; a same-day handover is legal; moving a
+    booking onto another fails through `bookings_propagate_dates`; cancelling
+    releases the unit and empties the view; `check_asset_availability()` answers
+    `0` afterwards; a zero-day window is refused by `bookings_window`; and a
+    renter with history cannot be deleted.
+
 ## Rules the new code must keep
 
 - Every table: RLS enabled, four policies, each one asking both
