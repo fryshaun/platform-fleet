@@ -16,7 +16,7 @@ import {
   assetHandleProblem,
   assetNameProblem,
   deriveAssetHandle,
-  isAssetStatus,
+  isSettableAssetStatus,
   serialProblem,
 } from "@/lib/assets";
 import type { AssetStatus } from "@/lib/supabase/types";
@@ -109,7 +109,7 @@ function readAssetDraft(
   }
 
   const status = readField(formData, "status");
-  if (!isAssetStatus(status)) {
+  if (!isSettableAssetStatus(status)) {
     return { error: "Choose a valid status." };
   }
 
@@ -222,8 +222,29 @@ export async function setAssetStatus(formData: FormData) {
   }
 
   const status = readField(formData, "status");
-  if (!isAssetStatus(status)) {
-    redirectWith(slug, back, { error: "Choose a valid status." });
+  if (!isSettableAssetStatus(status)) {
+    redirectWith(slug, back, {
+      error:
+        status === "rented"
+          ? "A unit is marked out on hire by its booking, not by hand."
+          : "Choose a valid status.",
+    });
+  }
+
+  // A rented unit is out with a renter. Its status belongs to the booking until
+  // that booking comes back, so the desk cancels or completes the hire first.
+  const { data: current } = await context.supabase
+    .from("assets")
+    .select("status")
+    .eq("id", assetId)
+    .eq("company_id", context.company.id)
+    .maybeSingle();
+
+  if (current?.status === "rented") {
+    redirectWith(slug, back, {
+      error:
+        "That unit is out on hire. Complete or cancel the booking before changing its status.",
+    });
   }
 
   const { error } = await context.supabase
@@ -256,6 +277,23 @@ export async function deleteAsset(formData: FormData) {
   }
 
   const back = assetPath(formData);
+
+  // A unit that is out is still earning; deleting its row while a booking holds
+  // it would drop the hire's history. Retiring is the softer option anyway.
+  const { data: current } = await context.supabase
+    .from("assets")
+    .select("status")
+    .eq("id", assetId)
+    .eq("company_id", context.company.id)
+    .maybeSingle();
+
+  if (current?.status === "rented") {
+    redirectWith(slug, back, {
+      error:
+        "That unit is out on hire. Complete or cancel the booking before deleting it.",
+    });
+  }
+
   const { error } = await context.supabase
     .from("assets")
     .delete()

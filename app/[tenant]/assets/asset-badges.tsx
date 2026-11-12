@@ -20,7 +20,7 @@ export function AssetStatusBadge({ status }: { status: AssetStatus }) {
       variant={
         status === "available"
           ? "brand"
-          : status === "maintenance"
+          : status === "in_workshop"
             ? "destructive"
             : "outline"
       }

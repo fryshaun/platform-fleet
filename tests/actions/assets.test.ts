@@ -290,7 +290,7 @@ describe("setAssetStatus", () => {
     slug: "acme",
     asset_id: ASSET_ID,
     current_handle: "bike-1",
-    status: "maintenance",
+    status: "in_workshop",
   };
 
   it("lets the front desk take a unit out of action", async () => {
@@ -302,9 +302,9 @@ describe("setAssetStatus", () => {
 
     // The one write staff owns: it must not need the manager tier, and it must
     // not carry anything but the status.
-    expect(mock.argFor("assets", "update")).toEqual({ status: "maintenance" });
+    expect(mock.argFor("assets", "update")).toEqual({ status: "in_workshop" });
     expect(redirectPath(url)).toBe("/acme/assets/bike-1");
-    expect(redirectParams(url).get("ok")).toBe("Marked out of action.");
+    expect(redirectParams(url).get("ok")).toBe("Marked in the workshop.");
   });
 
   it("denies a viewer", async () => {
@@ -373,10 +373,15 @@ describe("deleteAsset", () => {
 
     await captureRedirect(() => deleteAsset(formDataOf(REMOVAL)));
 
-    expect(mock.argsFor("assets", "eq")).toEqual([
-      ["id", ASSET_ID],
-      ["company_id", COMPANY_ID],
-    ]);
+    // The action reads the unit first — a rented unit's status belongs to its
+    // booking — so the chain carries the read's conditions too. Both are scoped
+    // by id and company.
+    expect(mock.argsFor("assets", "eq")).toEqual(
+      expect.arrayContaining([
+        ["id", ASSET_ID],
+        ["company_id", COMPANY_ID],
+      ]),
+    );
   });
 
   it("returns to the fleet with a confirmation", async () => {
@@ -437,12 +442,12 @@ describe("a read-only workspace", () => {
 
     const url = await captureRedirect(() =>
       setAssetStatus(
-        formDataOf({ slug: "acme", asset_id: ASSET_ID, status: "maintenance" }),
+        formDataOf({ slug: "acme", asset_id: ASSET_ID, status: "in_workshop" }),
       ),
     );
 
     expect(mock.methodsFor("assets")).toContain("update");
-    expect(redirectParams(url).get("ok")).toBe("Marked out of action.");
+    expect(redirectParams(url).get("ok")).toBe("Marked in the workshop.");
   });
 
   it("refuses to delete a unit", async () => {

@@ -172,12 +172,42 @@ may be fitted only while un-booked — so the third case the plan listed,
 is deliberately not written. Unreachable code that looks like a guarantee is
 worse than a sentence saying why it is unnecessary.
 
+**Stage 5 — usage logs**
+
+- Migration 21: `asset_usage_logs` (incremental `hours` / `distance_km`, a
+  `logged_on` day, `hours > 0 or distance_km > 0`) and its policies on the
+  **assets** section.
+
+**Stage 6 — service intervals**
+
+- Migration 22: `interval_days` / `interval_km` / `interval_hours` on
+  `component_kinds`, `component_service_events`, and the derived
+  `component_service_status` view (`ok` / `due_soon` at 80% / `overdue`, with
+  usage clipped to the fitted window and to the last service).
+- Migration 23: Guard 5 for both new tables.
+
+**Stage 7 — rented**
+
+- Migration 24: `maintenance` renamed to `in_workshop`, `rented` added.
+- Migration 25: `assets.status_before_rent`, `refresh_asset_rented()`, the
+  `booking_line_items_asset_status` trigger that calls it, and the one-off
+  backfill.
+- `lib/assets.ts`: `ASSET_STATUSES` and the labels ("In the workshop",
+  "Out on hire"), `ASSET_SETTABLE_STATUSES` (three, never `rented`),
+  `isSettableAssetStatus`, and `summariseAssets` counting `outOnHire` — with the
+  `else` branch that would have counted `rented` as retired removed.
+- `lib/actions/assets.ts`: `setAssetStatus` refuses `rented` and refuses any
+  change while a unit is out; `deleteAsset` refuses while a unit is out.
+- Tests: the `usage logs and servicing` and `rented is derived` blocks in
+  `tests/db/schema.test.ts`, plus the status tests in `tests/unit/assets.test.ts`
+  and the action tests.
+
 ## Not yet
 
-Stage 5 onward: `asset_usage_logs`, `component_service_events` and
-`component_service_status`; the `asset_status` enum change; the screens for
-stages 3–4 (`/assets/kinds`, the components card, the component line on a
-booking). Also still out: the renter-facing API, renter email, deposits.
+The screens for stages 3–7: `/assets/kinds`, the components and service cards on
+a unit, the usage log form, and the "Out on hire" status pill on the fleet page.
+The rules, the schema and the live proofs are done; the pages read them. Also
+still out: the renter-facing API, renter email, deposits.
 
 ## Order of work
 
@@ -230,6 +260,14 @@ the next starts.
   first held the add-on row inside an open transaction for four seconds, the
   second blocked for three and was then refused with "Only 0 of this extra are
   free". A comment saying "concurrency is handled" would not have shown that.
+- **`rented` sorts last.** An enum's order is fixed when it is created, and
+  `rented` was added after `retired`. The `?status=` sort on the fleet page reads
+  the database's order, so rented units appear after retired ones — worth knowing
+  before somebody reports it as a bug.
+- **The `else` in `summariseAssets` was the trap.** It counted every status it had
+  not heard of as retired, so `rented` would have inflated the retired figure and
+  the availability sentence with it. Every branch is now explicit, and the closed
+  union makes a new status a compile error instead of a silent wrong count.
 - **`TG_OP` is uppercase in PL/pgSQL** — `'INSERT'`, `'UPDATE'`, not lowercase.
   A lowercase comparison silently skips the branch: the price is never copied and
   the scope is never checked, and every insert still succeeds. The first live run

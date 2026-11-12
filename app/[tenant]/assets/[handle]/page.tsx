@@ -193,7 +193,7 @@ function AvailabilityCard({
         <CardDescription>
           {asset.status === "available"
             ? "In service, and counted in what this workspace can promise."
-            : asset.status === "maintenance"
+            : asset.status === "in_workshop"
               ? "Out of action, and excluded from what this workspace can promise until it is marked available again."
               : "Retired from the fleet. Kept so its history stays readable, and never booked."}
         </CardDescription>

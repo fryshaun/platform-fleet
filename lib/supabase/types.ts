@@ -29,6 +29,15 @@ export type SubscriptionStatus =
 export type ProductStatus = "draft" | "active" | "archived";
 
 /**
+ * How a component's service interval reads.
+ *
+ * Derived by `component_service_status` from the kind's interval, the part's
+ * fitted window and the unit's usage logs; nothing stores it. `due_soon` is 80%
+ * of an interval, so a workshop hears about a service before it is late.
+ */
+export type ServiceStatus = "ok" | "due_soon" | "overdue";
+
+/**
  * How a product is stocked.
  *
  * `item` counts one number (`inventory_quantity`); `dated` books rows in
@@ -41,11 +50,16 @@ export type ProductMediaKind = "image" | "video";
 /**
  * The state of one physical unit.
  *
- * `available` can be booked, `maintenance` is out of action but still in the
- * fleet, `retired` has left it. The list is complete on creation, like the
- * products ladder.
+ * `available` can be booked, `in_workshop` is out of action but still in the
+ * fleet, `retired` has left it, and `rented` is written **only** by
+ * `refresh_asset_rented()` from the bookings beneath it.
+ *
+ * The list is complete on creation, like the products ladder, and the order here
+ * is the database's order — `rented` was added after `retired`, so it sorts last.
+ * `ASSET_STATUSES` in `lib/assets.ts` repeats this list, and the schema test
+ * fails if the two drift.
  */
-export type AssetStatus = "available" | "maintenance" | "retired";
+export type AssetStatus = "available" | "in_workshop" | "retired" | "rented";
 
 /**
  * Where one reservation stands.
@@ -375,6 +389,8 @@ export type Database = {
           handle: string;
           serial: string | null;
           status: AssetStatus;
+          /** What the unit was before a booking made it rented. Trigger-written. */
+          status_before_rent: AssetStatus | null;
           status_changed_at: string;
           notes: string | null;
           metadata: Json;
@@ -389,6 +405,7 @@ export type Database = {
           handle: string;
           serial?: string | null;
           status?: AssetStatus;
+          status_before_rent?: AssetStatus | null;
           status_changed_at?: string;
           notes?: string | null;
           metadata?: Json;
@@ -403,6 +420,7 @@ export type Database = {
           handle?: string;
           serial?: string | null;
           status?: AssetStatus;
+          status_before_rent?: AssetStatus | null;
           status_changed_at?: string;
           notes?: string | null;
           metadata?: Json;
@@ -422,6 +440,10 @@ export type Database = {
           name: string;
           handle: string;
           position: number;
+          /** Days between services. NULL or 0 means not measured in days. */
+          interval_days: number | null;
+          interval_km: number | null;
+          interval_hours: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -431,6 +453,9 @@ export type Database = {
           name: string;
           handle: string;
           position?: number;
+          interval_days?: number | null;
+          interval_km?: number | null;
+          interval_hours?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -440,6 +465,9 @@ export type Database = {
           name?: string;
           handle?: string;
           position?: number;
+          interval_days?: number | null;
+          interval_km?: number | null;
+          interval_hours?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -488,6 +516,76 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * What a unit has actually done, one reading at a time (migration 21).
+       *
+       * Readings are **incremental**: `hours` and `distance_km` are what happened
+       * since the previous reading, not a cumulative odometer.
+       */
+      asset_usage_logs: {
+        Row: {
+          id: string;
+          company_id: string;
+          asset_id: string;
+          logged_on: string;
+          hours: number;
+          distance_km: number;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          asset_id: string;
+          logged_on?: string;
+          hours?: number;
+          distance_km?: number;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          asset_id?: string;
+          logged_on?: string;
+          hours?: number;
+          distance_km?: number;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      /**
+       * A service that happened, against a component (migration 22). Its date is
+       * what resets the interval on the kind.
+       */
+      component_service_events: {
+        Row: {
+          id: string;
+          company_id: string;
+          component_id: string;
+          serviced_on: string;
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          component_id: string;
+          serviced_on?: string;
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          component_id?: string;
+          serviced_on?: string;
+          notes?: string | null;
+          created_at?: string;
         };
         Relationships: [];
       };
@@ -807,6 +905,30 @@ export type Database = {
         };
         Relationships: [];
       };
+      /**
+       * The derived service state of every component (migration 22).
+       *
+       * `security_invoker = true`, so it is exactly as readable as the tables
+       * underneath it. `counted_from` is the later of the fitting and the last
+       * service, and the sums are the unit's usage readings inside that window.
+       */
+      component_service_status: {
+        Row: {
+          company_id: string;
+          component_id: string;
+          asset_id: string | null;
+          name: string;
+          interval_days: number;
+          interval_km: number;
+          interval_hours: number;
+          counted_from: string;
+          days_since: number;
+          hours_since: number;
+          km_since: number;
+          status: ServiceStatus;
+        };
+        Relationships: [];
+      };
     };
     Functions: {
       is_company_member: {
@@ -895,6 +1017,15 @@ export type Database = {
           exclude_line_item_id?: string | null;
         };
         Returns: number;
+      };
+      /**
+       * Marks a unit rented while a blocking booking line holds it today, and
+       * restores the remembered status afterwards (migration 25). Trigger-only:
+       * no client role may execute it.
+       */
+      refresh_asset_rented: {
+        Args: { target_company_id: string; target_asset_id: string };
+        Returns: undefined;
       };
     };
     Enums: {

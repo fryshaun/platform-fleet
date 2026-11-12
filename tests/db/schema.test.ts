@@ -16,6 +16,7 @@ import type {
 } from "@/lib/supabase/types";
 
 import { WRITABLE_STATUSES } from "@/lib/billing/entitlements";
+import { ASSET_STATUSES } from "@/lib/assets";
 import { BLOCKING_BOOKING_STATUSES } from "@/lib/bookings";
 
 /**
@@ -50,6 +51,11 @@ const MIGRATION_FILES = [
   "20260101001800_asset_components.sql",
   "20260101001900_components_write_gate.sql",
   "20260101002000_component_bookings.sql",
+  "20260101002100_asset_usage_logs.sql",
+  "20260101002200_component_service.sql",
+  "20260101002300_usage_write_gate.sql",
+  "20260101002400_asset_status_workshop.sql",
+  "20260101002500_asset_status_rented.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -82,6 +88,11 @@ const componentsGateSql = readMigration(
 const componentBookingsSql = readMigration(
   "20260101002000_component_bookings.sql",
 );
+const usageSql = readMigration("20260101002100_asset_usage_logs.sql");
+const serviceSql = readMigration("20260101002200_component_service.sql");
+const usageGateSql = readMigration("20260101002300_usage_write_gate.sql");
+const assetStatusSql = readMigration("20260101002400_asset_status_workshop.sql");
+const rentedSql = readMigration("20260101002500_asset_status_rented.sql");
 
 /**
  * The write gate is more than one file: a policy cannot name a table that does
@@ -94,6 +105,7 @@ const allGateSql = [
   bookingsGateSql,
   addonsGateSql,
   componentsGateSql,
+  usageGateSql,
 ].join("\n");
 
 const allSql = [
@@ -115,6 +127,11 @@ const allSql = [
   componentsSql,
   componentsGateSql,
   componentBookingsSql,
+  usageSql,
+  serviceSql,
+  usageGateSql,
+  assetStatusSql,
+  rentedSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -156,6 +173,8 @@ const ASSET_TABLES = ["assets"] as const satisfies readonly TableName[];
 const COMPONENT_TABLES = [
   "component_kinds",
   "asset_components",
+  "asset_usage_logs",
+  "component_service_events",
 ] as const satisfies readonly TableName[];
 
 /** The renters module: the people a booking is for, not the staff who take it. */
@@ -1274,13 +1293,24 @@ describe("enum values", () => {
     ] satisfies ProductMediaKind[]);
   });
 
-  it("matches asset_status", () => {
-    // Complete on creation: PostgreSQL will not let the same transaction use a
-    // value it has just added, so a status added later costs a migration.
+  it("matches asset_status, including the rename and the added value", () => {
+    // Created complete in migration 03 as `available, maintenance, retired`,
+    // then renamed and extended in migration 24. The ladder as it stands is
+    // `ASSET_STATUSES`, and this assertion is what fails if either side moves
+    // without the other — the drift that would make a `rented` unit count as
+    // retired on the fleet page.
     expect(enumValues(assetsSql, "asset_status")).toEqual([
       "available",
       "maintenance",
       "retired",
+    ]);
+    expect(assetStatusSql).toContain("to ''in_workshop''");
+    expect(assetStatusSql).toContain("add value if not exists 'rented'");
+    expect(ASSET_STATUSES).toEqual([
+      "available",
+      "in_workshop",
+      "retired",
+      "rented",
     ] satisfies AssetStatus[]);
   });
 
@@ -1544,6 +1574,8 @@ describe("the subscription write gate", () => {
     "booking_line_addons",
     "component_kinds",
     "asset_components",
+    "asset_usage_logs",
+    "component_service_events",
   ] as const;
 
   const CARVED_OUT = ["companies", "profiles", "company_members"] as const;
@@ -2136,6 +2168,113 @@ describe("components on a booking line", () => {
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101001300_bookings.sql"),
     );
+  });
+});
+
+describe("usage logs and servicing", () => {
+  it("stores readings, not an odometer", () => {
+    // The column comment is the contract: every sum in the view assumes the
+    // number is "since the last reading".
+    expect(usageSql).toContain(
+      "constraint asset_usage_logs_reading check (hours > 0 or distance_km > 0)",
+    );
+    expect(usageSql).toContain("Hours since the previous reading");
+    expect(usageSql).toContain("Kilometres since the previous reading");
+    expect(usageSql).toContain("on delete cascade");
+  });
+
+  it("puts the interval on the kind, not on the part", () => {
+    expect(serviceSql).toContain(
+      "add column if not exists interval_days integer",
+    );
+    expect(serviceSql).toContain("add column if not exists interval_km");
+    expect(serviceSql).toContain("add column if not exists interval_hours");
+    expect(serviceSql).toContain(
+      "a shop services every",
+    );
+  });
+
+  it("derives the service state instead of storing it", () => {
+    expect(serviceSql).toContain(
+      "create or replace view public.component_service_status",
+    );
+    expect(serviceSql).toContain("with (security_invoker = true)");
+    expect(serviceSql).toContain("then 'overdue'");
+    expect(serviceSql).toContain("then 'due_soon'");
+    expect(serviceSql).toContain("else 'ok'");
+    // 80% is where a workshop hears about it; below that it is quiet.
+    expect(serviceSql).toContain("* 0.8");
+    // Usage is clipped to the fitted window and to the last service.
+    expect(serviceSql).toContain("l.logged_on >= p.counted_from");
+    expect(serviceSql).toContain(
+      "p.removed_on is null or l.logged_on < p.removed_on",
+    );
+    expect(serviceSql).toContain(
+      "revoke all on public.component_service_status from anon;",
+    );
+  });
+
+  it("gates both new tables after they exist", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101002300_usage_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101002100_asset_usage_logs.sql"),
+    );
+    expect(
+      MIGRATION_FILES.indexOf("20260101002300_usage_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101002200_component_service.sql"),
+    );
+  });
+});
+
+describe("rented is derived", () => {
+  it("keeps the enum change and its use in separate migrations", () => {
+    // PostgreSQL refuses to use a value added in the same transaction, which is
+    // the only reason these are two files.
+    expect(
+      MIGRATION_FILES.indexOf("20260101002500_asset_status_rented.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101002400_asset_status_workshop.sql"),
+    );
+  });
+
+  it("remembers what the unit was", () => {
+    expect(rentedSql).toContain(
+      "add column if not exists status_before_rent public.asset_status",
+    );
+    expect(rentedSql).toContain("status_before_rent = current_status");
+    expect(rentedSql).toContain(
+      "set status = coalesce(status_before_rent, 'available')",
+    );
+  });
+
+  it("only counts today, half-open", () => {
+    // The same arithmetic as the exclusion constraint: out on the 4th, back and
+    // free on the morning of the 8th.
+    expect(rentedSql).toContain("l.starts_on <= current_date");
+    expect(rentedSql).toContain("l.ends_on > current_date");
+  });
+
+  it("is written by a trigger and by nothing else", () => {
+    expect(rentedSql).toContain(
+      "create or replace function public.refresh_asset_rented(",
+    );
+    expect(rentedSql).toContain(
+      "after insert or update of asset_id, blocks_stock, starts_on, ends_on",
+    );
+    expect(rentedSql).toContain(
+      "revoke all on function public.refresh_asset_rented(uuid, uuid) from public, anon, authenticated;",
+    );
+    expect(rentedSql).toContain(
+      "revoke all on function public.booking_line_items_asset_status() from public, anon, authenticated;",
+    );
+  });
+
+  it("does not let a person set it", () => {
+    // The action and the form both refuse it; `ASSET_SETTABLE_STATUSES` is the
+    // list they use, and it is deliberately shorter than the enum.
+    expect(ASSET_STATUSES).toContain("rented");
   });
 });
 

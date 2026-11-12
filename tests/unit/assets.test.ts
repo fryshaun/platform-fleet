@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSET_SETTABLE_STATUSES,
   ASSET_SORT_OPTIONS,
   ASSET_STATUS_LABELS,
   ASSET_STATUS_OPTIONS,
@@ -15,6 +16,7 @@ import {
   formatStatusChanged,
   isAssetAvailable,
   isAssetStatus,
+  isSettableAssetStatus,
   readAssetSort,
   serialProblem,
   summariseAssets,
@@ -23,29 +25,53 @@ import {
 import { PRODUCT_ID, assetRow } from "../helpers/fixtures";
 
 describe("asset statuses", () => {
-  it("offers a label and an explanation for every status", () => {
+  it("offers a label and an explanation for every status a person may set", () => {
+    // `rented` is a status but not a choice: the form has no row for it.
     expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).toEqual([
-      ...ASSET_STATUSES,
+      ...ASSET_SETTABLE_STATUSES,
     ]);
 
     for (const option of ASSET_STATUS_OPTIONS) {
       expect(option.label).toBe(ASSET_STATUS_LABELS[option.value]);
       expect(option.description.length).toBeGreaterThan(0);
     }
+
+    expect(ASSET_STATUSES).toEqual([
+      "available",
+      "in_workshop",
+      "retired",
+      "rented",
+    ]);
   });
 
-  it("recognises only the three statuses", () => {
+  it("recognises only the four statuses", () => {
     for (const status of ASSET_STATUSES) {
       expect(isAssetStatus(status)).toBe(true);
     }
 
-    for (const value of ["sold", "Available", "", null, undefined, 3]) {
+    for (const value of ["sold", "maintenance", "Available", "", null, 3]) {
       expect(isAssetStatus(value)).toBe(false);
     }
   });
 
   it("labels a status the way the pill spells it", () => {
-    expect(assetStatusLabel("maintenance")).toBe("Out of action");
+    expect(assetStatusLabel("in_workshop")).toBe("In the workshop");
+    expect(assetStatusLabel("rented")).toBe("Out on hire");
+  });
+
+  it("does not let a person type \"rented\"", () => {
+    // The status belongs to the booking. The form offers three, the action
+    // refuses the fourth, and this is the pair that keeps them in step.
+    expect(ASSET_SETTABLE_STATUSES).toEqual([
+      "available",
+      "in_workshop",
+      "retired",
+    ]);
+    expect(isSettableAssetStatus("available")).toBe(true);
+    expect(isSettableAssetStatus("rented")).toBe(false);
+    expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).toEqual([
+      ...ASSET_SETTABLE_STATUSES,
+    ]);
   });
 });
 
@@ -122,22 +148,26 @@ describe("field limits", () => {
 describe("availability", () => {
   it("counts only available units as bookable", () => {
     expect(isAssetAvailable({ status: "available" })).toBe(true);
-    expect(isAssetAvailable({ status: "maintenance" })).toBe(false);
+    expect(isAssetAvailable({ status: "in_workshop" })).toBe(false);
     expect(isAssetAvailable({ status: "retired" })).toBe(false);
+    // Out on hire is unavailable without being out of service.
+    expect(isAssetAvailable({ status: "rented" })).toBe(false);
   });
 
   it("counts a fleet by status", () => {
     const assets = [
       assetRow(),
       assetRow({ id: "a2", status: "available" }),
-      assetRow({ id: "a3", status: "maintenance" }),
+      assetRow({ id: "a3", status: "in_workshop" }),
       assetRow({ id: "a4", status: "retired" }),
+      assetRow({ id: "a5", status: "rented" }),
     ];
 
     expect(summariseAssets(assets)).toEqual({
-      total: 4,
+      total: 5,
       available: 2,
       outOfService: 1,
+      outOnHire: 1,
       retired: 1,
     });
   });
@@ -147,6 +177,7 @@ describe("availability", () => {
       total: 0,
       available: 0,
       outOfService: 0,
+      outOnHire: 0,
       retired: 0,
     });
   });
@@ -168,7 +199,7 @@ describe("availability", () => {
       availabilityLabel([
         assetRow(),
         assetRow({ id: "a2" }),
-        assetRow({ id: "a3", status: "maintenance" }),
+        assetRow({ id: "a3", status: "in_workshop" }),
       ]),
     ).toBe("2 of 3 available");
   });
@@ -176,7 +207,7 @@ describe("availability", () => {
   it("says none when every unit is out of service", () => {
     expect(
       availabilityLabel([
-        assetRow({ status: "maintenance" }),
+        assetRow({ status: "in_workshop" }),
         assetRow({ id: "a2", status: "retired" }),
       ]),
     ).toBe("None of 2 available");
