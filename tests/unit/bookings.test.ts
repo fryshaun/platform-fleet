@@ -14,6 +14,7 @@ import {
   bookingReferenceProblem,
   bookingTotals,
   canMoveBooking,
+  customerHandleFrom,
   dateRangeProblem,
   formatBookingPrice,
   formatBookingWindow,
@@ -142,6 +143,30 @@ describe("booking references", () => {
   });
 });
 
+describe("renter handles", () => {
+  it("derives a handle from the name", () => {
+    expect(customerHandleFrom("Nadia Okafor")).toBe("nadia-okafor");
+  });
+
+  it("suffixes a collision instead of asking again with the same one", () => {
+    expect(customerHandleFrom("Nadia Okafor", 1)).toBe("nadia-okafor-2");
+    expect(customerHandleFrom("Nadia Okafor", 2)).toBe("nadia-okafor-3");
+  });
+
+  it("keeps the column's three-character minimum", () => {
+    // The CHECK on `customers.handle` refuses anything shorter.
+    expect(customerHandleFrom("Bo")).toBe("rider-bo");
+    expect(customerHandleFrom("!!")).toBe("rider-new");
+  });
+
+  it("stays inside the fifty characters the column allows", () => {
+    const handle = customerHandleFrom("A".repeat(120), 9);
+
+    expect(handle.length).toBeLessThanOrEqual(50);
+    expect(handle).toMatch(/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])$/);
+  });
+});
+
 describe("booking windows", () => {
   it("refuses a window that holds no day", () => {
     // Half-open: `[d, d)` is empty, so it is a typo rather than a one-day hire.
@@ -246,6 +271,7 @@ describe("parseBookingDraft", () => {
     ).toEqual({
       draft: {
         customer_id: CUSTOMER_ID,
+        new_customer: null,
         starts_on: "2026-03-04",
         ends_on: "2026-03-08",
         status: "pending",
@@ -254,10 +280,46 @@ describe("parseBookingDraft", () => {
     });
   });
 
-  it("requires a renter", () => {
+  it("requires a renter, either picked or typed in", () => {
     expect(
       parseBookingDraft(formDataOf({ ...DRAFT, customer_id: "  " })),
-    ).toEqual({ error: "Choose a renter first." });
+    ).toEqual({ error: "Choose a renter, or add a new one." });
+  });
+
+  it("reads a walk-in who has no row yet", () => {
+    // The form creates the renter inline; there is no directory in this slice.
+    expect(
+      parseBookingDraft(
+        formDataOf({
+          ...DRAFT,
+          customer_id: "",
+          new_customer_name: "  Bo Adeyemi ",
+          new_customer_email: "bo@example.com",
+          new_customer_phone: "",
+        }),
+      ),
+    ).toEqual({
+      draft: {
+        customer_id: null,
+        new_customer: {
+          full_name: "Bo Adeyemi",
+          email: "bo@example.com",
+          phone: null,
+        },
+        starts_on: "2026-03-04",
+        ends_on: "2026-03-08",
+        status: "pending",
+        notes: null,
+      },
+    });
+  });
+
+  it("refuses a one-letter name for a new renter", () => {
+    expect(
+      parseBookingDraft(
+        formDataOf({ ...DRAFT, customer_id: "", new_customer_name: "B" }),
+      ),
+    ).toEqual({ error: "A new renter needs a name." });
   });
 
   it("refuses a window the constraint would refuse", () => {

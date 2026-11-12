@@ -66,11 +66,12 @@ disagree with the constraint.
   table that does not exist yet.
 - `lib/supabase/types.ts`: `BookingStatus`, `BookingChannel`, four tables,
   `check_asset_availability`, and the first real entry in `Views`.
-- `lib/bookings.ts` — client-safe: statuses and labels, the transition table,
-  `BOOKING_SORT_OPTIONS` / `readBookingSort`, `bookingReferenceProblem`,
-  `bookingReferenceFrom(random)`, `dateRangeProblem`, `bookingDays`,
-  `rangesOverlap`, `lineItemTotal`, `bookingTotals`, `formatBookingPrice`,
-  `parseBookingDraft`.
+- `lib/bookings.ts` — client-safe: statuses, labels and channels, the transition
+  table, `BLOCKING_BOOKING_STATUSES`, `BOOKING_SORT_OPTIONS` / `readBookingSort`,
+  `bookingReferenceProblem`, `bookingReferenceFrom(random)`,
+  `customerHandleFrom`, `dateRangeProblem`, `bookingDays`, `rangesOverlap`,
+  `formatBookingWindow`, `lineItemTotal`, `bookingTotals`, `formatBookingPrice`,
+  `parseBookingDraft`, `parseLineItemDraft`.
 - `lib/actions/bookings.ts` — `createBooking`, `updateBooking`,
   `setBookingStatus`, `deleteBooking`, `addLineItem`, `updateLineItem`,
   `removeLineItem`, `assignAsset`, `assignRider`.
@@ -113,7 +114,9 @@ Each step ends green before the next starts.
 4. **`lib/supabase/types.ts`.**
 5. **`lib/bookings.ts`**, then `tests/unit/bookings.test.ts`.
 6. **`lib/actions/bookings.ts`**, then `tests/actions/bookings.test.ts`.
-7. **Pages and components.**
+7. **Pages and components.** The create panel resolves the renter, because there
+   is no renter directory in this slice: either an existing row or a walk-in that
+   `createBooking` records before it writes the booking.
 8. **`lib/features.ts` and the sidebar icon.**
 9. **Fixtures.**
 10. **Validation:** `pnpm supabase db reset` (the CLI is a devDependency now, so

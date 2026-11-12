@@ -3,6 +3,7 @@ import {
   isIsoDate,
   parsePriceCents,
 } from "@/lib/products";
+import { slugify } from "@/lib/slug";
 import type {
   BookingChannel,
   BookingStatus,
@@ -321,6 +322,34 @@ export function formatBookingPrice(cents: number, currency: string): string {
 }
 
 // -----------------------------------------------------------------------------
+// Renters
+// -----------------------------------------------------------------------------
+/**
+ * The longest base a generated renter handle may have.
+ *
+ * The column's CHECK allows 50 characters and a collision suffix adds up to
+ * three (`-10`), so 44 leaves room without ever crossing the limit.
+ */
+const RENTER_HANDLE_BASE_LENGTH = 44;
+
+/**
+ * A handle for a renter created from the booking form.
+ *
+ * `attempt` counts collisions with renters already in the workspace: the unique
+ * index on `(company_id, handle)` is what decides, and the action asks again with
+ * the next number rather than showing the desk a `23505`.
+ */
+export function customerHandleFrom(fullName: string, attempt = 0): string {
+  const slug = slugify(fullName);
+  // The column's CHECK needs three characters, so "Bo" becomes "rider-bo".
+  const base = (slug.length >= 3 ? slug : `rider-${slug || "new"}`)
+    .slice(0, RENTER_HANDLE_BASE_LENGTH)
+    .replace(/-+$/, "");
+
+  return attempt === 0 ? base : `${base}-${attempt + 1}`;
+}
+
+// -----------------------------------------------------------------------------
 // The forms
 // -----------------------------------------------------------------------------
 /**
@@ -331,9 +360,24 @@ export function formatBookingPrice(cents: number, currency: string): string {
  */
 export const NEW_BOOKING_FORM_ID = "booking-new-form";
 
-/** A booking row, as the create and edit forms submit it. */
+/** The inline "new renter" fields the booking form may carry. */
+export type NewCustomerDraft = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+};
+
+/**
+ * A booking row, as the create and edit forms submit it.
+ *
+ * On create exactly one of `customer_id` and `new_customer` is set: the desk
+ * either picks a renter the workspace already knows or types a walk-in in. An
+ * edit sends `customer_id` only — changing who booked is a different
+ * conversation, and the action refuses a renter it cannot see anyway.
+ */
 export type BookingDraft = {
-  customer_id: string;
+  customer_id: string | null;
+  new_customer: NewCustomerDraft | null;
   starts_on: string;
   ends_on: string;
   status: BookingStatus;
@@ -356,8 +400,16 @@ export function parseBookingDraft(
   formData: FormData,
 ): { draft: BookingDraft } | { error: string } {
   const customerId = field(formData, "customer_id");
-  if (!customerId) {
-    return { error: "Choose a renter first." };
+  const newName = field(formData, "new_customer_name");
+
+  if (!customerId && !newName) {
+    return { error: "Choose a renter, or add a new one." };
+  }
+  if (newName && newName.length < 2) {
+    return { error: "A new renter needs a name." };
+  }
+  if (newName && newName.length > 120) {
+    return { error: "That name is too long." };
   }
 
   const startsOn = field(formData, "starts_on");
@@ -374,7 +426,14 @@ export function parseBookingDraft(
 
   return {
     draft: {
-      customer_id: customerId,
+      customer_id: customerId || null,
+      new_customer: newName
+        ? {
+            full_name: newName,
+            email: field(formData, "new_customer_email") || null,
+            phone: field(formData, "new_customer_phone") || null,
+          }
+        : null,
       starts_on: startsOn,
       ends_on: endsOn,
       status,

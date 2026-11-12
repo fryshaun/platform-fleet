@@ -123,7 +123,9 @@ describe("createBooking", () => {
     );
 
     expect(redirectPath(url)).toBe("/acme/bookings");
-    expect(redirectParams(url).get("error")).toBe("Choose a renter first.");
+    expect(redirectParams(url).get("error")).toBe(
+      "Choose a renter, or add a new one.",
+    );
   });
 
   it("generates the reference and scopes the row to the workspace", async () => {
@@ -166,6 +168,68 @@ describe("createBooking", () => {
     expect(redirectPath(url)).toBe("/acme/bookings/BK-ABC234");
     expect(redirectParams(url).get("ok")).toBe("Booking taken.");
     expect(cacheMock.revalidatePath).toHaveBeenCalledWith("/acme", "layout");
+  });
+
+  it("records a walk-in before taking the booking", async () => {
+    const mock = setup("staff", {
+      handlers: {
+        customers: () => ({ data: { id: CUSTOMER_ID }, error: null }),
+        bookings: () => ({ data: { reference: "BK-ABC234" }, error: null }),
+      },
+    });
+
+    await captureRedirect(() =>
+      createBooking(
+        formDataOf({
+          ...DRAFT,
+          customer_id: "",
+          new_customer_name: "Nadia Okafor",
+        }),
+      ),
+    );
+
+    expect(mock.argFor("customers", "insert")).toEqual({
+      company_id: COMPANY_ID,
+      handle: "nadia-okafor",
+      full_name: "Nadia Okafor",
+      email: null,
+      phone: null,
+    });
+    expect(mock.argFor("bookings", "insert")).toMatchObject({
+      customer_id: CUSTOMER_ID,
+    });
+  });
+
+  it("explains a renter address that is already on file", async () => {
+    const mock = setup("staff", {
+      handlers: {
+        customers: () => ({
+          data: null,
+          error: {
+            message:
+              'duplicate key value violates unique constraint "customers_email_idx"',
+            code: "23505",
+          },
+        }),
+      },
+    });
+
+    const url = await captureRedirect(() =>
+      createBooking(
+        formDataOf({
+          ...DRAFT,
+          customer_id: "",
+          new_customer_name: "Nadia Okafor",
+          new_customer_email: "nadia@example.com",
+        }),
+      ),
+    );
+
+    expect(redirectParams(url).get("error")).toBe(
+      "That address is already one of this workspace's renters.",
+    );
+    // Nothing was booked against a renter the desk could not create.
+    expect(mock.methodsFor("bookings")).toEqual([]);
   });
 
   it("retries a colliding reference before giving up", async () => {

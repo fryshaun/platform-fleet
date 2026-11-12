@@ -10,14 +10,17 @@ import {
   requireManager,
   requireSection,
   requireWritableWorkspace,
+  type ActionContext,
 } from "@/lib/actions/support";
 import {
   BOOKING_STATUS_LABELS,
   bookingReferenceFrom,
   canMoveBooking,
+  customerHandleFrom,
   isBookingStatus,
   parseBookingDraft,
   parseLineItemDraft,
+  type NewCustomerDraft,
 } from "@/lib/bookings";
 
 /**
@@ -83,6 +86,59 @@ function bookingPath(formData: FormData): string {
 /** How many times a colliding generated reference is retried. */
 const REFERENCE_ATTEMPTS = 3;
 
+/** How many renter handles one creation may try. */
+const HANDLE_ATTEMPTS = 3;
+
+type RenterResult = { id: string } | { error: string };
+
+/**
+ * Records a renter typed in at the desk.
+ *
+ * There is no renter directory in this slice, so the booking form is where a
+ * walk-in enters the system. Two unique indexes can refuse the row and they mean
+ * different things: a handle collision is retried with the next number, while a
+ * duplicate address is somebody already on file and is answered with a sentence
+ * the desk can act on instead of a raw `23505`.
+ */
+async function createRenter(
+  context: ActionContext,
+  renter: NewCustomerDraft,
+): Promise<RenterResult> {
+  for (let attempt = 0; attempt < HANDLE_ATTEMPTS; attempt += 1) {
+    const { data, error } = await context.supabase
+      .from("customers")
+      .insert({
+        company_id: context.company.id,
+        handle: customerHandleFrom(renter.full_name, attempt),
+        full_name: renter.full_name,
+        email: renter.email,
+        phone: renter.phone,
+      })
+      .select("id")
+      .single();
+
+    if (!error) {
+      return data
+        ? { id: data.id }
+        : { error: "Could not record that renter." };
+    }
+
+    if (error.code !== "23505") {
+      return { error: writeErrorMessage(error) };
+    }
+
+    if (error.message.includes("customers_email")) {
+      return {
+        error: "That address is already one of this workspace's renters.",
+      };
+    }
+  }
+
+  return {
+    error: "Could not find an address for that renter. Try another name.",
+  };
+}
+
 /**
  * Takes a booking.
  *
@@ -103,6 +159,26 @@ export async function createBooking(formData: FormData) {
   }
 
   const draft = parsed.draft;
+
+  // A walk-in has no row yet: record the renter first, then hang the booking on
+  // it. The booking is never taken against a name nobody can look up later.
+  let customerId = draft.customer_id;
+
+  if (!customerId) {
+    if (!draft.new_customer) {
+      redirectWith(slug, "bookings", {
+        error: "Choose a renter, or add a new one.",
+      });
+    }
+
+    const renter = await createRenter(context, draft.new_customer);
+    if ("error" in renter) {
+      redirectWith(slug, "bookings", { error: renter.error });
+    }
+
+    customerId = renter.id;
+  }
+
   let reference = bookingReferenceFrom(Math.random);
   let failure: { message: string; code?: string } | null = null;
 
@@ -112,7 +188,7 @@ export async function createBooking(formData: FormData) {
       .insert({
         company_id: context.company.id,
         reference,
-        customer_id: draft.customer_id,
+        customer_id: customerId,
         status: draft.status,
         // Only the desk writes here; the renter API is a later pass.
         channel: "staff",
@@ -170,11 +246,21 @@ export async function updateBooking(formData: FormData) {
     redirectWith(slug, back, { error: parsed.error });
   }
 
-  const { status: _ignored, ...draft } = parsed.draft;
+  // The status is not written here: `setBookingStatus` owns it, and it asks
+  // `canMoveBooking` first.
+  const customerId = parsed.draft.customer_id;
+  if (!customerId) {
+    redirectWith(slug, back, { error: "Choose a renter." });
+  }
 
   const { error } = await context.supabase
     .from("bookings")
-    .update(draft)
+    .update({
+      customer_id: customerId,
+      starts_on: parsed.draft.starts_on,
+      ends_on: parsed.draft.ends_on,
+      notes: parsed.draft.notes,
+    })
     .eq("id", bookingId)
     .eq("company_id", context.company.id);
 
