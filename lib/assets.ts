@@ -111,7 +111,7 @@ export function readAssetSort(value: unknown): AssetSort {
  * Segments `/assets/<handle>` already uses for its own pages, so no asset may
  * claim them. Mirrors the route folder names under `app/[tenant]/assets/`.
  */
-export const RESERVED_ASSET_HANDLES = new Set(["new"]);
+export const RESERVED_ASSET_HANDLES = new Set(["new", "kinds"]);
 
 /** Explains what is wrong with an asset handle, or `null` when it is usable. */
 export function assetHandleProblem(handle: string): string | null {

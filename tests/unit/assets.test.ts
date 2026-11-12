@@ -100,6 +100,8 @@ describe("assetHandleProblem", () => {
 
   it("refuses the section's own route names", () => {
     expect(assetHandleProblem("new")).toContain("reserved");
+    // `/assets/kinds` is the taxonomy page; a unit handled "kinds" would hide it.
+    expect(assetHandleProblem("kinds")).toContain("reserved");
   });
 
   it("applies the company slug rules", () => {

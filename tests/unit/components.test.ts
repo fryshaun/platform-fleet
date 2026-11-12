@@ -4,12 +4,15 @@ import {
   componentWhereLabel,
   componentsForAsset,
   deriveKindHandle,
+  describeInterval,
   fittedWindowProblem,
+  intervalInputValue,
   isFitted,
   kindHandleProblem,
   kindNameProblem,
   parseComponentDraft,
   parseComponentKindDraft,
+  parseIntervalValue,
 } from "@/lib/components";
 
 import {
@@ -155,11 +158,27 @@ describe("component kinds", () => {
 
   it("reads a kind off the form, ordering last", () => {
     expect(parseComponentKindDraft(formDataOf({ name: "Wheelset" }))).toEqual({
-      draft: { name: "Wheelset", handle: "wheelset", position: 0 },
+      draft: {
+        name: "Wheelset",
+        handle: "wheelset",
+        position: 0,
+        interval_days: null,
+        interval_km: null,
+        interval_hours: null,
+      },
     });
     expect(
       parseComponentKindDraft(formDataOf({ name: "Fork", position: "3" })),
-    ).toEqual({ draft: { name: "Fork", handle: "fork", position: 3 } });
+    ).toEqual({
+      draft: {
+        name: "Fork",
+        handle: "fork",
+        position: 3,
+        interval_days: null,
+        interval_km: null,
+        interval_hours: null,
+      },
+    });
   });
 
   it("keeps the address an edit did not touch", () => {
@@ -167,7 +186,56 @@ describe("component kinds", () => {
       parseComponentKindDraft(
         formDataOf({ name: "Forks", current_handle: "fork" }),
       ),
-    ).toEqual({ draft: { name: "Forks", handle: "fork", position: 0 } });
+    ).toEqual({
+      draft: {
+        name: "Forks",
+        handle: "fork",
+        position: 0,
+        interval_days: null,
+        interval_km: null,
+        interval_hours: null,
+      },
+    });
+  });
+
+  it("reads the three service intervals", () => {
+    // A fork is serviced by hours ridden, a chain by distance, brake fluid by
+    // the calendar: one kind may carry all three.
+    expect(
+      parseComponentKindDraft(
+        formDataOf({
+          name: "Fork",
+          interval_days: "365",
+          interval_km: "12000",
+          interval_hours: "50",
+        }),
+      ),
+    ).toEqual({
+      draft: {
+        name: "Fork",
+        handle: "fork",
+        position: 0,
+        interval_days: 365,
+        interval_km: 12000,
+        interval_hours: 50,
+      },
+    });
+  });
+
+  it("refuses an interval the columns cannot hold", () => {
+    expect(
+      parseComponentKindDraft(formDataOf({ name: "Fork", interval_days: "1.5" })),
+    ).toEqual({ error: "Days between services is a whole number." });
+    expect(
+      parseComponentKindDraft(formDataOf({ name: "Fork", interval_km: "1.234" })),
+    ).toEqual({
+      error: "Use a number with at most two decimals for the km interval.",
+    });
+    expect(
+      parseComponentKindDraft(
+        formDataOf({ name: "Fork", interval_hours: "100001" }),
+      ),
+    ).toEqual({ error: "Keep the hours interval under 100,000." });
   });
 
   it("refuses an order that is not a whole number", () => {
@@ -197,5 +265,64 @@ describe("a component's fitted window", () => {
   it("refuses a fitted date it cannot read", () => {
     expect(fittedWindowProblem("", "")).toContain("Choose the day");
     expect(fittedWindowProblem("yesterday", "")).toContain("Choose the day");
+  });
+});
+
+
+describe("service intervals", () => {
+  it("treats an empty or zero interval as not measured", () => {
+    expect(parseIntervalValue("", "days")).toEqual({ value: null });
+    expect(parseIntervalValue("  ", "km")).toEqual({ value: null });
+    // 0 and null are one state: the view coalesces the column to 0.
+    expect(parseIntervalValue("0", "hours")).toEqual({ value: null });
+  });
+
+  it("reads whole days and decimal kilometres", () => {
+    expect(parseIntervalValue("90", "days")).toEqual({ value: 90 });
+    expect(parseIntervalValue("200.5", "km")).toEqual({ value: 200.5 });
+    expect(parseIntervalValue("50.25", "hours")).toEqual({ value: 50.25 });
+  });
+
+  it("refuses a fraction of a day, or a negative interval", () => {
+    expect(parseIntervalValue("1.5", "days")).toEqual({
+      error: "Days between services is a whole number.",
+    });
+    expect(parseIntervalValue("-5", "km")).toEqual({
+      error: "Use a number with at most two decimals for the km interval.",
+    });
+  });
+
+  it("refuses more precision than the column keeps", () => {
+    expect(parseIntervalValue("1.234", "km")).toEqual({
+      error: "Use a number with at most two decimals for the km interval.",
+    });
+  });
+
+  it("shows a stored amount back in the input", () => {
+    expect(intervalInputValue(null)).toBe("");
+    expect(intervalInputValue(90)).toBe("90");
+    expect(intervalInputValue(200.5)).toBe("200.5");
+  });
+
+  it("says how often a kind is serviced", () => {
+    const none = {
+      interval_days: null,
+      interval_km: null,
+      interval_hours: null,
+    };
+    expect(describeInterval(none)).toBe("No interval set");
+    // A zero from an older row reads as absent, the way the view reads it.
+    expect(describeInterval({ ...none, interval_days: 0 })).toBe(
+      "No interval set",
+    );
+    expect(describeInterval({ ...none, interval_km: 200 })).toBe("every 200 km");
+    expect(
+      describeInterval({
+        interval_days: 90,
+        interval_km: 200,
+        interval_hours: 50,
+      }),
+    ).toBe("every 90 days · every 200 km · every 50 hours");
+    expect(describeInterval({ ...none, interval_days: 1 })).toBe("every 1 day");
   });
 });

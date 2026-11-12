@@ -53,12 +53,156 @@ export function kindNameProblem(name: string): string | null {
   return null;
 }
 
+// -----------------------------------------------------------------------------
+// Service intervals
+// -----------------------------------------------------------------------------
+/**
+ * The three ways a workshop measures a service interval.
+ *
+ * A kind may carry all three, some, or none: a chain wears by distance, a fork
+ * damper by hours ridden, brake fluid by the calendar. Keeping the number on the
+ * *kind* rather than on each part is what lets one interval apply to every fork
+ * in the fleet.
+ */
+export const SERVICE_INTERVAL_UNITS = ["days", "km", "hours"] as const;
+
+export type ServiceIntervalUnit = (typeof SERVICE_INTERVAL_UNITS)[number];
+
+/**
+ * How each interval is asked for on the form.
+ *
+ * The labels, the hints and the step are here rather than in the JSX so the
+ * three inputs are rendered from one list and cannot drift from the units the
+ * parser accepts.
+ */
+export const SERVICE_INTERVAL_FIELDS: Record<
+  ServiceIntervalUnit,
+  { label: string; placeholder: string; step: string; hint: string }
+> = {
+  days: {
+    label: "Every … days",
+    placeholder: "90",
+    step: "1",
+    hint: "Calendar work — brake fluid, bearings, an annual check.",
+  },
+  km: {
+    label: "Every … km",
+    placeholder: "200",
+    step: "0.01",
+    hint: "Distance work — tyres, chains, pads, from the unit's usage log.",
+  },
+  hours: {
+    label: "Every … hours",
+    placeholder: "50",
+    step: "0.01",
+    hint: "Riding hours — fork and shock service.",
+  },
+};
+
+/** The form field a unit's interval is posted as, and the column it lands in. */
+export function intervalFieldName(
+  unit: ServiceIntervalUnit,
+): `interval_${ServiceIntervalUnit}` {
+  return `interval_${unit}`;
+}
+
+/**
+ * Friendly ceilings, deliberately inside the columns (`integer`, `numeric(10,2)`,
+ * `numeric(8,2)`) rather than at their edge: a typo that lands on 999999 hours
+ * should be a sentence, not a Postgres error.
+ */
+const INTERVAL_LIMITS: Record<ServiceIntervalUnit, number> = {
+  days: 3650,
+  km: 200_000,
+  hours: 100_000,
+};
+
+/**
+ * Reads one interval off the form.
+ *
+ * Empty and `0` mean the same thing — "not measured this way". Migration 22
+ * coalesces the columns to 0 in the view, so the two behave identically there;
+ * storing `null` keeps that from turning into two spellings of one state in the
+ * table. Days must be whole (the column is an `integer`); the other two take up
+ * to two decimals.
+ */
+export function parseIntervalValue(
+  raw: string,
+  unit: ServiceIntervalUnit,
+): { value: number | null } | { error: string } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { value: null };
+
+  const pattern = unit === "days" ? /^\d+$/ : /^\d+(?:\.\d{1,2})?$/;
+  if (!pattern.test(trimmed)) {
+    return {
+      error:
+        unit === "days"
+          ? "Days between services is a whole number."
+          : `Use a number with at most two decimals for the ${unit} interval.`,
+    };
+  }
+
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) {
+    return { error: "An interval cannot be negative." };
+  }
+  if (value === 0) return { value: null };
+  if (value > INTERVAL_LIMITS[unit]) {
+    return {
+      error: `Keep the ${unit} interval under ${INTERVAL_LIMITS[
+        unit
+      ].toLocaleString("en-US")}.`,
+    };
+  }
+
+  return { value };
+}
+
+/** The value an interval input should show for a stored amount. */
+export function intervalInputValue(value: number | null): string {
+  if (value === null) return "";
+  // PostgREST hands a `numeric` back as a number for these sizes, but a string
+  // costs nothing to accept and a stray "200.00" in an input looks like a bug.
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? String(numeric) : "";
+}
+
+/**
+ * "every 90 days · every 200 km", or "No interval set".
+ *
+ * A zero interval reads as absent: an older row may hold 0, the view treats that
+ * as "not measured", and the label must agree with the arithmetic.
+ */
+export function describeInterval(
+  kind: Pick<ComponentKind, "interval_days" | "interval_km" | "interval_hours">,
+): string {
+  const days = Number(kind.interval_days ?? 0);
+  const km = Number(kind.interval_km ?? 0);
+  const hours = Number(kind.interval_hours ?? 0);
+  const parts: string[] = [];
+
+  if (days > 0) parts.push(`every ${days} ${days === 1 ? "day" : "days"}`);
+  if (km > 0) parts.push(`every ${String(km)} km`);
+  if (hours > 0) {
+    parts.push(`every ${String(hours)} ${hours === 1 ? "hour" : "hours"}`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : "No interval set";
+}
+
 /** A kind, as the taxonomy form submits it. */
 export type ComponentKindDraft = {
   name: string;
   handle: string;
   position: number;
+  interval_days: number | null;
+  interval_km: number | null;
+  interval_hours: number | null;
 };
+
+/** The id of the "new kind" `<form>`, so the panel's footer button can submit it. */
+export const NEW_KIND_FORM_ID = "kind-new-form";
 
 /** Reads and validates a taxonomy row. */
 export function parseComponentKindDraft(
@@ -84,7 +228,23 @@ export function parseComponentKindDraft(
     return { error: "Order is a whole number, 0 or more." };
   }
 
-  return { draft: { name, handle, position } };
+  const days = parseIntervalValue(field(formData, "interval_days"), "days");
+  if ("error" in days) return { error: days.error };
+  const km = parseIntervalValue(field(formData, "interval_km"), "km");
+  if ("error" in km) return { error: km.error };
+  const hours = parseIntervalValue(field(formData, "interval_hours"), "hours");
+  if ("error" in hours) return { error: hours.error };
+
+  return {
+    draft: {
+      name,
+      handle,
+      position,
+      interval_days: days.value,
+      interval_km: km.value,
+      interval_hours: hours.value,
+    },
+  };
 }
 
 // -----------------------------------------------------------------------------
