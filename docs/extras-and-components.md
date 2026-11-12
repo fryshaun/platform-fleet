@@ -94,7 +94,9 @@ copied, the rule migration 04 already states for counts.
 
 ## In this slice
 
-Stage 1 only. The later stages are under *Not yet* and land in their own commits.
+Stages 1 and 2. Later stages are under *Not yet* and land in their own commits.
+
+**Stage 1 — the catalogue, its scope and the line extras**
 
 - Migration 15: `addon_price_kind` and `addon_status`, `addons`,
   `addon_products`, `booking_line_addons`, `booking_line_items_company_id_unique`
@@ -116,13 +118,27 @@ Stage 1 only. The later stages are under *Not yet* and land in their own commits
 - Tests: the `extras` block in `tests/db/schema.test.ts`,
   `tests/unit/addons.test.ts`, and the `addonRow`/`lineAddonRow` fixtures.
 
+**Stage 2 — stock**
+
+- Migration 17: `addons.track_stock`, `addons.quantity_on_hand`,
+  `check_addon_availability(company, addon, from, to, exclude_line_item)`,
+  the snapshot trigger rebuilt with the `for update` lock and the stock count,
+  and `bookings_addon_stock_guard` on `bookings` status changes.
+- `lib/addons.ts`: `MAX_ADDON_STOCK`, `addonStockProblem`, `addonStockLabel`,
+  and `parseAddonDraft` reading the checkbox and the count.
+- `lib/actions/addons.ts`: `addLineAddon` asks the advisory availability
+  function first, so an oversell arrives as "only one of those is free".
+- The catalogue form gained the stock block; the deck card shows
+  "Unlimited" or "6 in stock".
+- Tests: the `add-on stock` block in `tests/db/schema.test.ts` and the stock
+  block in `tests/unit/addons.test.ts`.
+
 ## Not yet
 
-Stage 2 onward: `addons.track_stock` and `quantity_on_hand`,
-`check_addon_availability`, `bookings_addon_stock_guard`; `component_kinds`,
-`asset_components`, component booking lines, `asset_usage_logs`,
-`component_service_events` and `component_service_status`; the `asset_status`
-enum change. Also still out: the renter-facing API, renter email, deposits.
+Stage 3 onward: `component_kinds`, `asset_components`, component booking lines,
+`asset_usage_logs`, `component_service_events` and `component_service_status`;
+the `asset_status` enum change. Also still out: the renter-facing API, renter
+email, deposits.
 
 ## Order of work
 
@@ -166,6 +182,15 @@ the next starts.
 
 ## Gotchas worth remembering
 
+- **A cancelled line does not claim stock.** The insert trigger checks only when
+  the line's `blocks_stock` is true, so a cancelled or returned booking can be
+  edited freely; `bookings_addon_stock_guard` re-checks everything when the
+  booking starts holding stock again. Gating on the *new* row's line rather than
+  on its add-on is what keeps those two behaviours from contradicting.
+- **The `for update` really is the guard.** The live proof ran two sessions: the
+  first held the add-on row inside an open transaction for four seconds, the
+  second blocked for three and was then refused with "Only 0 of this extra are
+  free". A comment saying "concurrency is handled" would not have shown that.
 - **`TG_OP` is uppercase in PL/pgSQL** — `'INSERT'`, `'UPDATE'`, not lowercase.
   A lowercase comparison silently skips the branch: the price is never copied and
   the scope is never checked, and every insert still succeeds. The first live run

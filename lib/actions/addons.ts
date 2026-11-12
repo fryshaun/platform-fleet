@@ -256,15 +256,30 @@ export async function addLineAddon(formData: FormData) {
     redirectWith(slug, back, { error: "Choose an extra first." });
   }
 
-  const { data: addon } = await context.supabase
-    .from("addons")
-    .select("id, name, max_quantity, status")
-    .eq("id", addonId)
-    .eq("company_id", context.company.id)
-    .maybeSingle();
+  const [addonResult, lineResult] = await Promise.all([
+    context.supabase
+      .from("addons")
+      .select("id, name, max_quantity, status, track_stock, quantity_on_hand")
+      .eq("id", addonId)
+      .eq("company_id", context.company.id)
+      .maybeSingle(),
+    context.supabase
+      .from("booking_line_items")
+      .select("id, starts_on, ends_on")
+      .eq("id", lineItemId)
+      .eq("company_id", context.company.id)
+      .maybeSingle(),
+  ]);
+
+  const addon = addonResult.data;
+  const line = lineResult.data;
 
   if (!addon) {
     redirectWith(slug, back, { error: "That extra is no longer here." });
+  }
+
+  if (!line) {
+    redirectWith(slug, back, { error: "That line is no longer here." });
   }
 
   if (addon.status !== "active") {
@@ -277,6 +292,31 @@ export async function addLineAddon(formData: FormData) {
   const quantityProblem = addonQuantityProblem(quantity, addon.max_quantity);
   if (quantityProblem) {
     redirectWith(slug, back, { error: quantityProblem });
+  }
+
+  // Advisory only: the trigger takes the row lock and is what actually holds
+  // under two desks booking at once. This is what turns a refusal into "only
+  // one of those is free" before anything is written.
+  if (addon.track_stock) {
+    const { data: taken } = await context.supabase.rpc(
+      "check_addon_availability",
+      {
+        target_company_id: context.company.id,
+        target_addon_id: addonId,
+        from_date: line.starts_on,
+        to_date: line.ends_on,
+      },
+    );
+
+    if (typeof taken === "number" && taken + quantity > addon.quantity_on_hand) {
+      const free = Math.max(addon.quantity_on_hand - taken, 0);
+      redirectWith(slug, back, {
+        error:
+          free === 0
+            ? "None of those are free on those dates."
+            : `Only ${free} of those ${free === 1 ? "is" : "are"} free on those dates.`,
+      });
+    }
   }
 
   const { error } = await context.supabase.from("booking_line_addons").insert({

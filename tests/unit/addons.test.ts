@@ -7,12 +7,15 @@ import {
   ADDON_STATUSES,
   ADDON_STATUS_LABELS,
   MAX_ADDON_QUANTITY,
+  MAX_ADDON_STOCK,
   addonChargeCents,
   addonHandleProblem,
   addonNameProblem,
   addonPriceLabel,
   addonQuantityProblem,
   addonScopeByAddon,
+  addonStockLabel,
+  addonStockProblem,
   addonsForLine,
   bookingAddonsTotal,
   deriveAddonHandle,
@@ -266,6 +269,8 @@ describe("the catalogue form", () => {
         price_cents: 750,
         price_kind: "per_day",
         max_quantity: 2,
+        track_stock: false,
+        quantity_on_hand: 0,
         status: "active",
       },
     });
@@ -282,6 +287,8 @@ describe("the catalogue form", () => {
         price_cents: 0,
         price_kind: "per_booking",
         max_quantity: 1,
+        track_stock: false,
+        quantity_on_hand: 0,
         status: "active",
       },
     });
@@ -323,6 +330,67 @@ describe("the catalogue form", () => {
     expect(
       parseAddonDraft(formDataOf({ name: "Helmet", max_quantity: "0" })),
     ).toEqual({ error: "Choose at least one." });
+  });
+});
+
+describe("how many of an extra the shop owns", () => {
+  it("looks at the figure only when the extra is counted", () => {
+    // An unlimited extra's number is never read, so a stale one is harmless.
+    expect(addonStockProblem(false, -5)).toBeNull();
+    expect(addonStockProblem(false, MAX_ADDON_STOCK + 1)).toBeNull();
+  });
+
+  it("refuses a count it cannot store", () => {
+    expect(addonStockProblem(true, -1)).toContain("whole number");
+    expect(addonStockProblem(true, 1.5)).toContain("whole number");
+    expect(addonStockProblem(true, MAX_ADDON_STOCK + 1)).toContain(
+      `under ${MAX_ADDON_STOCK + 1}`,
+    );
+    expect(addonStockProblem(true, 0)).toBeNull();
+    expect(addonStockProblem(true, 6)).toBeNull();
+  });
+
+  it("says which of the two the catalogue row is", () => {
+    expect(addonStockLabel({ track_stock: false, quantity_on_hand: 0 })).toBe(
+      "Unlimited",
+    );
+    expect(addonStockLabel({ track_stock: true, quantity_on_hand: 6 })).toBe(
+      "6 in stock",
+    );
+  });
+
+  it("reads the checkbox and the count off the form", () => {
+    const parsed = parseAddonDraft(
+      formDataOf({
+        name: "Helmet",
+        track_stock: "on",
+        quantity_on_hand: "6",
+      }),
+    );
+
+    expect(parsed).toMatchObject({
+      draft: { track_stock: true, quantity_on_hand: 6 },
+    });
+  });
+
+  it("treats an unticked checkbox as unlimited", () => {
+    // A checkbox posts nothing when it is not ticked, which is the whole reason
+    // the field is read as "present or absent" rather than as a boolean string.
+    const parsed = parseAddonDraft(
+      formDataOf({ name: "Helmet", quantity_on_hand: "6" }),
+    );
+
+    expect(parsed).toMatchObject({
+      draft: { track_stock: false, quantity_on_hand: 6 },
+    });
+  });
+
+  it("refuses a negative count on a counted extra", () => {
+    expect(
+      parseAddonDraft(
+        formDataOf({ name: "Helmet", track_stock: "on", quantity_on_hand: "-1" }),
+      ),
+    ).toEqual({ error: "Enter how many the shop owns, as a whole number." });
   });
 });
 

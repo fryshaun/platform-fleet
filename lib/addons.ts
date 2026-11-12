@@ -116,6 +116,38 @@ export function addonNameProblem(name: string): string | null {
 /** The most one booking line may take of any extra; a catalogue row may set less. */
 export const MAX_ADDON_QUANTITY = 99;
 
+/** The most an extra's shelf may hold. Mirrors the column's CHECK. */
+export const MAX_ADDON_STOCK = 9999;
+
+/**
+ * Explains why a stock figure is not allowed, or `null`.
+ *
+ * Only checked when the extra is counted: an unlimited extra's `quantity_on_hand`
+ * is not read anywhere, so a stale number there is harmless and stays as typed.
+ */
+export function addonStockProblem(
+  trackStock: boolean,
+  quantityOnHand: number,
+): string | null {
+  if (!trackStock) return null;
+  if (!Number.isInteger(quantityOnHand) || quantityOnHand < 0) {
+    return "Enter how many the shop owns, as a whole number.";
+  }
+  if (quantityOnHand > MAX_ADDON_STOCK) {
+    return `Keep the stock figure under ${MAX_ADDON_STOCK + 1}.`;
+  }
+  return null;
+}
+
+/** "Unlimited" or "6 in stock", for the catalogue card. */
+export function addonStockLabel(
+  addon: Pick<Addon, "track_stock" | "quantity_on_hand">,
+): string {
+  return addon.track_stock
+    ? `${addon.quantity_on_hand} in stock`
+    : "Unlimited";
+}
+
 /** Explains why a quantity is not allowed for this extra, or `null`. */
 export function addonQuantityProblem(
   quantity: number,
@@ -268,6 +300,8 @@ export type AddonDraft = {
   price_cents: number;
   price_kind: AddonPriceKind;
   max_quantity: number;
+  track_stock: boolean;
+  quantity_on_hand: number;
   status: AddonStatus;
 };
 
@@ -329,6 +363,18 @@ export function parseAddonDraft(
     return { error: "Choose whether the extra is on offer or archived." };
   }
 
+  // A checkbox posts its value only when ticked, so "anything present" is the
+  // truth: the form sends `track_stock=on` or nothing at all.
+  const trackStock = field(formData, "track_stock") !== "";
+  const quantityOnHand = Number.parseInt(
+    field(formData, "quantity_on_hand") || "0",
+    10,
+  );
+  const stockProblem = addonStockProblem(trackStock, quantityOnHand);
+  if (stockProblem) {
+    return { error: stockProblem };
+  }
+
   return {
     draft: {
       name,
@@ -337,6 +383,8 @@ export function parseAddonDraft(
       price_cents: priceCents,
       price_kind: kind,
       max_quantity: maxQuantity,
+      track_stock: trackStock,
+      quantity_on_hand: quantityOnHand,
       status,
     },
   };

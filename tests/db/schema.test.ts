@@ -46,6 +46,7 @@ const MIGRATION_FILES = [
   "20260101001400_bookings_write_gate.sql",
   "20260101001500_catalog_addons.sql",
   "20260101001600_addons_write_gate.sql",
+  "20260101001700_addon_stock.sql",
 ] as const;
 
 function readMigration(name: string): string {
@@ -70,6 +71,7 @@ const bookingsSql = readMigration("20260101001300_bookings.sql");
 const bookingsGateSql = readMigration("20260101001400_bookings_write_gate.sql");
 const addonsSql = readMigration("20260101001500_catalog_addons.sql");
 const addonsGateSql = readMigration("20260101001600_addons_write_gate.sql");
+const addonStockSql = readMigration("20260101001700_addon_stock.sql");
 
 /**
  * The write gate is more than one file: a policy cannot name a table that does
@@ -96,6 +98,7 @@ const allSql = [
   bookingsGateSql,
   addonsSql,
   addonsGateSql,
+  addonStockSql,
 ].join("\n");
 
 type PublicSchema = Database["public"];
@@ -1859,6 +1862,89 @@ describe("extras", () => {
     // that does not exist yet.
     expect(
       MIGRATION_FILES.indexOf("20260101001600_addons_write_gate.sql"),
+    ).toBeGreaterThan(
+      MIGRATION_FILES.indexOf("20260101001500_catalog_addons.sql"),
+    );
+  });
+});
+
+describe("add-on stock", () => {
+  it("adds the two columns without a rewrite", () => {
+    // `add column if not exists` with a default is what keeps the migration
+    // runnable on a database that already has catalogue rows.
+    expect(addonStockSql).toContain(
+      "add column if not exists track_stock boolean not null default false",
+    );
+    expect(addonStockSql).toContain(
+      "add column if not exists quantity_on_hand integer not null default 0",
+    );
+    // Untracked is the default: a shop that never counts its helmets must not be
+    // told it has run out.
+    expect(addonStockSql).toContain(
+      "add constraint addons_quantity_on_hand_check",
+    );
+    expect(addonStockSql).toContain(
+      "check (quantity_on_hand between 0 and 9999)",
+    );
+  });
+
+  it("answers the availability question as a definer", () => {
+    expect(addonStockSql).toContain(
+      "create or replace function public.check_addon_availability(",
+    );
+    expect(addonStockSql).toContain("exclude_line_item_id uuid default null");
+    expect(addonStockSql).toContain("l.blocks_stock");
+    expect(addonStockSql).toContain(
+      "daterange(l.starts_on, l.ends_on, '[)')",
+    );
+    expect(addonStockSql).toContain("set search_path = ''");
+    expect(addonStockSql).toContain(
+      "revoke all on function public.check_addon_availability(uuid, uuid, date, date, uuid) from public, anon;",
+    );
+  });
+
+  it("locks the add-on row before it counts", () => {
+    // The lock is the oversell guard; the count is only the sentence. Without
+    // `for update` two desks read the same free figure and both insert.
+    expect(addonStockSql).toMatch(
+      /from public\.addons a[\s\S]{0,200}for update;/,
+    );
+    expect(addonStockSql).toContain(
+      "if taken + new.quantity > catalogue_on_hand then",
+    );
+    // Only a counted extra is checked, and only on a line that holds stock.
+    expect(addonStockSql).toContain(
+      "if catalogue_tracks and line_blocks_stock then",
+    );
+  });
+
+  it("re-checks the extras when a booking starts holding stock", () => {
+    expect(addonStockSql).toContain(
+      "create or replace function public.bookings_addon_stock_guard()",
+    );
+    expect(addonStockSql).toContain(
+      "before update of status on public.bookings",
+    );
+    expect(addonStockSql).toContain(
+      "if not public.booking_blocks_stock(new.status)",
+    );
+    expect(addonStockSql).toContain("for update;");
+    // The booking being confirmed must not count its own lines against itself.
+    expect(addonStockSql).toContain("l.booking_id <> new.id");
+  });
+
+  it("keeps the trigger-only guard away from every client role", () => {
+    expect(addonStockSql).toContain(
+      "revoke all on function public.bookings_addon_stock_guard() from public, anon, authenticated;",
+    );
+    expect(addonStockSql).toContain(
+      "grant execute on function public.bookings_addon_stock_guard() to service_role;",
+    );
+  });
+
+  it("is applied after the table it alters", () => {
+    expect(
+      MIGRATION_FILES.indexOf("20260101001700_addon_stock.sql"),
     ).toBeGreaterThan(
       MIGRATION_FILES.indexOf("20260101001500_catalog_addons.sql"),
     );

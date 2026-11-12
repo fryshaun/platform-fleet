@@ -599,6 +599,10 @@ export type Database = {
           price_cents: number;
           price_kind: AddonPriceKind;
           max_quantity: number;
+          /** When true, the bookings may not take more than `quantity_on_hand`. */
+          track_stock: boolean;
+          /** How many the shop owns. Read only when `track_stock` is true. */
+          quantity_on_hand: number;
           status: AddonStatus;
           created_at: string;
           updated_at: string;
@@ -612,6 +616,8 @@ export type Database = {
           price_cents?: number;
           price_kind?: AddonPriceKind;
           max_quantity?: number;
+          track_stock?: boolean;
+          quantity_on_hand?: number;
           status?: AddonStatus;
           created_at?: string;
           updated_at?: string;
@@ -625,6 +631,8 @@ export type Database = {
           price_cents?: number;
           price_kind?: AddonPriceKind;
           max_quantity?: number;
+          track_stock?: boolean;
+          quantity_on_hand?: number;
           status?: AddonStatus;
           created_at?: string;
           updated_at?: string;
@@ -788,6 +796,20 @@ export type Database = {
        */
       set_addon_products: {
         Args: { target_addon_id: string; product_ids?: string[] };
+        Returns: number;
+      };
+      /**
+       * How many of an extra other blocking lines already took over the window
+       * (migration 17). Advisory: the trigger on `booking_line_addons` decides.
+       */
+      check_addon_availability: {
+        Args: {
+          target_company_id: string;
+          target_addon_id: string;
+          from_date: string;
+          to_date: string;
+          exclude_line_item_id?: string | null;
+        };
         Returns: number;
       };
     };

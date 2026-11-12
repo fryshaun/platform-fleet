@@ -5,6 +5,7 @@ import {
   ADDON_STATUS_LABELS,
   addonPriceLabel,
   addonScopeByAddon,
+  addonStockLabel,
   type Addon,
   type AddonProduct,
 } from "@/lib/addons";
@@ -64,6 +65,8 @@ export function AddonDeck({
                       {addon.max_quantity === 1
                         ? "one per line"
                         : `up to ${addon.max_quantity} per line`}
+                      {" · "}
+                      {addonStockLabel(addon)}
                       {" · "}
                       {scopedTo.length === 0
                         ? "every product"

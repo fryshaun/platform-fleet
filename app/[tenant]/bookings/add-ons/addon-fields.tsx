@@ -9,6 +9,7 @@ import {
   ADDON_STATUSES,
   ADDON_STATUS_LABELS,
   MAX_ADDON_QUANTITY,
+  MAX_ADDON_STOCK,
   type Addon,
 } from "@/lib/addons";
 import type { Tables } from "@/lib/supabase/types";
@@ -127,6 +128,30 @@ export function AddonFields({
           min={1}
           max={MAX_ADDON_QUANTITY}
           defaultValue={addon?.max_quantity ?? 1}
+        />
+      </div>
+
+      <div className={cn("space-y-2", wide)}>
+        <Label htmlFor={fieldId("track_stock")}>Stock</Label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            id={fieldId("track_stock")}
+            type="checkbox"
+            name="track_stock"
+            defaultChecked={addon?.track_stock ?? false}
+          />
+          <span>
+            Count these, and refuse a booking that would take more than the shop
+            owns
+          </span>
+        </label>
+        <Input
+          name="quantity_on_hand"
+          type="number"
+          min={0}
+          max={MAX_ADDON_STOCK}
+          defaultValue={addon?.quantity_on_hand ?? 0}
+          aria-label="How many the shop owns"
         />
       </div>
 
