@@ -8,8 +8,8 @@
 -- The rule is deliberately narrow. Reads are never gated — nothing a workspace
 -- stored disappears because a card expired, and a page that cannot show a
 -- product cannot explain why. What closes is writing the things a subscription
--- pays for: products, categories, gallery, dates and the fleet, plus the
--- `product-media` bucket they live in.
+-- pays for: products, categories, gallery, dates, the fleet, the renters and the
+-- booking book, plus the `product-media` bucket they live in.
 --
 -- Deliberately *not* gated, because they are how a workspace repairs itself or
 -- leaves: `companies` (settings, extensions, logo, MFA), `profiles` (the
@@ -44,6 +44,10 @@
 -- 403, a failed `using` on update or delete is a silent zero-row success. That
 -- is why `requireWritableWorkspace()` in `lib/actions/support.ts` asks the same
 -- question first — RLS decides, the action explains.
+--
+-- One guard lives in a later file, because a policy cannot name a table that
+-- does not exist yet: Guard 5 for the renters and the booking book in
+-- `20260101001400_bookings_write_gate.sql`.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------

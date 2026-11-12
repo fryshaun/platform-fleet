@@ -4,9 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BoxesIcon,
+  CalendarCheckIcon,
   LayoutDashboardIcon,
   PackageIcon,
   TagsIcon,
+  WrenchIcon,
 } from "lucide-react";
 
 import {
@@ -22,7 +24,9 @@ const NAV_ICONS = {
   dashboard: LayoutDashboardIcon,
   products: PackageIcon,
   assets: BoxesIcon,
+  bookings: CalendarCheckIcon,
   categories: TagsIcon,
+  kinds: WrenchIcon,
 } as const;
 
 export type NavIcon = keyof typeof NAV_ICONS;

@@ -81,7 +81,7 @@ export function AssetsSection({
                   variant={
                     asset.status === "available"
                       ? "brand"
-                      : asset.status === "maintenance"
+                      : asset.status === "in_workshop"
                         ? "destructive"
                         : "outline"
                   }

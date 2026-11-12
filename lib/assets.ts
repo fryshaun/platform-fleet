@@ -17,31 +17,70 @@ export type Asset = Tables<"assets">;
 // -----------------------------------------------------------------------------
 export const ASSET_STATUSES = [
   "available",
-  "maintenance",
+  "in_workshop",
   "retired",
+  "rented",
 ] as const satisfies readonly AssetStatus[];
 
 export const ASSET_STATUS_LABELS: Record<AssetStatus, string> = {
   available: "Available",
-  maintenance: "Out of action",
+  in_workshop: "In the workshop",
   retired: "Retired",
+  rented: "Out on hire",
 };
 
-export const ASSET_STATUS_OPTIONS = ASSET_STATUSES.map((status) => ({
+/**
+ * The statuses a person may set.
+ *
+ * `rented` is absent on purpose: it is written by `refresh_asset_rented()` from
+ * today's bookings, and a form that could set it would let a unit be marked out
+ * when nothing is holding it. The action refuses it and the page does not offer
+ * it, so the two can never disagree.
+ */
+export const ASSET_SETTABLE_STATUSES = [
+  "available",
+  "in_workshop",
+  "retired",
+] as const satisfies readonly AssetStatus[];
+
+export const ASSET_STATUS_OPTIONS = ASSET_SETTABLE_STATUSES.map((status) => ({
   value: status,
   label: ASSET_STATUS_LABELS[status],
   description:
     status === "available"
       ? "In service, and can be booked."
-      : status === "maintenance"
-        ? "Still in the fleet, but must not be booked today."
+      : status === "in_workshop"
+        ? "Still in the fleet, but out of action while it is being fixed."
         : "Has left the fleet. Kept so its history stays readable.",
+}));
+
+/**
+ * The statuses the fleet filter offers.
+ *
+ * All four, `rented` included: filtering is a read, and "what is out on hire
+ * today?" is one of the questions the list is opened to answer. The edit form and
+ * the status buttons use `ASSET_STATUS_OPTIONS` instead, because a person may not
+ * *set* `rented` — a booking does that.
+ */
+export const ASSET_STATUS_FILTER_OPTIONS = ASSET_STATUSES.map((status) => ({
+  value: status,
+  label: ASSET_STATUS_LABELS[status],
 }));
 
 export function isAssetStatus(value: unknown): value is AssetStatus {
   return (
     typeof value === "string" &&
     (ASSET_STATUSES as readonly string[]).includes(value)
+  );
+}
+
+/** True when a person may move a unit into this status. */
+export function isSettableAssetStatus(
+  value: unknown,
+): value is (typeof ASSET_SETTABLE_STATUSES)[number] {
+  return (
+    typeof value === "string" &&
+    (ASSET_SETTABLE_STATUSES as readonly string[]).includes(value)
   );
 }
 
@@ -85,7 +124,7 @@ export function readAssetSort(value: unknown): AssetSort {
  * Segments `/assets/<handle>` already uses for its own pages, so no asset may
  * claim them. Mirrors the route folder names under `app/[tenant]/assets/`.
  */
-export const RESERVED_ASSET_HANDLES = new Set(["new"]);
+export const RESERVED_ASSET_HANDLES = new Set(["new", "kinds"]);
 
 /** Explains what is wrong with an asset handle, or `null` when it is usable. */
 export function assetHandleProblem(handle: string): string | null {
@@ -154,24 +193,40 @@ export type AssetSummary = {
   total: number;
   available: number;
   outOfService: number;
+  outOnHire: number;
   retired: number;
 };
 
-/** Counts a set of units. Retired ones are counted apart from out of action. */
+/**
+ * Counts a set of units.
+ *
+ * Every branch is spelled out rather than ending in `else`: the `else` this
+ * replaces silently counted any status it had not heard of as retired, which is
+ * exactly what `rented` would have become. A missing `else` is a compile error
+ * here, because `AssetStatus` is a closed union.
+ */
 export function summariseAssets(
   assets: readonly Pick<Asset, "status">[],
 ): AssetSummary {
   let available = 0;
   let outOfService = 0;
+  let outOnHire = 0;
   let retired = 0;
 
   for (const asset of assets) {
     if (asset.status === "available") available += 1;
-    else if (asset.status === "maintenance") outOfService += 1;
-    else retired += 1;
+    else if (asset.status === "in_workshop") outOfService += 1;
+    else if (asset.status === "rented") outOnHire += 1;
+    else if (asset.status === "retired") retired += 1;
   }
 
-  return { total: assets.length, available, outOfService, retired };
+  return {
+    total: assets.length,
+    available,
+    outOfService,
+    outOnHire,
+    retired,
+  };
 }
 
 /**
@@ -226,5 +281,59 @@ export function formatStatusChanged(iso: string): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(new Date(iso));
+}
+
+
+// -----------------------------------------------------------------------------
+// The unit page's tabs
+// -----------------------------------------------------------------------------
+/**
+ * The unit page is a screen split into tabs, and every tab is a real URL — the
+ * same arrangement `lib/settings.ts` makes for the settings screens, for the
+ * same reasons: the pages stay server-rendered, a link to "Service" means
+ * something, and the back button moves between tabs.
+ *
+ * Overview is the index (`/assets/<handle>`) because that URL existed before the
+ * split, and it is where the fleet list and every redirect still point.
+ *
+ * This module is the only place that knows the order, the labels and the paths,
+ * so the strip, the header and every redirect agree by construction.
+ */
+export type AssetTab = "overview" | "components" | "usage" | "service";
+
+export type AssetTabDefinition = {
+  tab: AssetTab;
+  /** Label in the tab strip. */
+  label: string;
+  /** Path segment under the unit's handle; empty for the index tab. */
+  segment: string;
+};
+
+export const ASSET_TABS: readonly AssetTabDefinition[] = [
+  { tab: "overview", label: "Overview", segment: "" },
+  { tab: "components", label: "Components", segment: "components" },
+  { tab: "usage", label: "Usage", segment: "usage" },
+  { tab: "service", label: "Service", segment: "service" },
+];
+
+/** `/acme/assets/bike-1/service` — a link to a tab. */
+export function assetTabPath(
+  slug: string,
+  handle: string,
+  tab: AssetTab,
+): string {
+  return `/${slug}/${assetTabSegment(handle, tab)}`;
+}
+
+/**
+ * The path after the workspace slug, shaped like the `path` argument of
+ * `redirectWith`, which prepends `/{slug}/`. A Server Action names a tab instead
+ * of spelling the URL out, so a typo fails to compile rather than 404s.
+ */
+export function assetTabSegment(handle: string, tab: AssetTab): string {
+  const definition = ASSET_TABS.find((entry) => entry.tab === tab);
+  return definition?.segment
+    ? `assets/${handle}/${definition.segment}`
+    : `assets/${handle}`;
 }
 

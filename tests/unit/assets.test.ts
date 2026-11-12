@@ -1,20 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ASSET_SETTABLE_STATUSES,
   ASSET_SORT_OPTIONS,
   ASSET_STATUS_LABELS,
+  ASSET_STATUS_FILTER_OPTIONS,
   ASSET_STATUS_OPTIONS,
   ASSET_STATUSES,
+  ASSET_TABS,
   assetHandleProblem,
   assetNameProblem,
   assetsByProduct,
   assetsForProduct,
   assetStatusLabel,
+  assetTabPath,
+  assetTabSegment,
   availabilityLabel,
   deriveAssetHandle,
   formatStatusChanged,
   isAssetAvailable,
   isAssetStatus,
+  isSettableAssetStatus,
   readAssetSort,
   serialProblem,
   summariseAssets,
@@ -23,29 +29,53 @@ import {
 import { PRODUCT_ID, assetRow } from "../helpers/fixtures";
 
 describe("asset statuses", () => {
-  it("offers a label and an explanation for every status", () => {
+  it("offers a label and an explanation for every status a person may set", () => {
+    // `rented` is a status but not a choice: the form has no row for it.
     expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).toEqual([
-      ...ASSET_STATUSES,
+      ...ASSET_SETTABLE_STATUSES,
     ]);
 
     for (const option of ASSET_STATUS_OPTIONS) {
       expect(option.label).toBe(ASSET_STATUS_LABELS[option.value]);
       expect(option.description.length).toBeGreaterThan(0);
     }
+
+    expect(ASSET_STATUSES).toEqual([
+      "available",
+      "in_workshop",
+      "retired",
+      "rented",
+    ]);
   });
 
-  it("recognises only the three statuses", () => {
+  it("recognises only the four statuses", () => {
     for (const status of ASSET_STATUSES) {
       expect(isAssetStatus(status)).toBe(true);
     }
 
-    for (const value of ["sold", "Available", "", null, undefined, 3]) {
+    for (const value of ["sold", "maintenance", "Available", "", null, 3]) {
       expect(isAssetStatus(value)).toBe(false);
     }
   });
 
   it("labels a status the way the pill spells it", () => {
-    expect(assetStatusLabel("maintenance")).toBe("Out of action");
+    expect(assetStatusLabel("in_workshop")).toBe("In the workshop");
+    expect(assetStatusLabel("rented")).toBe("Out on hire");
+  });
+
+  it("does not let a person type \"rented\"", () => {
+    // The status belongs to the booking. The form offers three, the action
+    // refuses the fourth, and this is the pair that keeps them in step.
+    expect(ASSET_SETTABLE_STATUSES).toEqual([
+      "available",
+      "in_workshop",
+      "retired",
+    ]);
+    expect(isSettableAssetStatus("available")).toBe(true);
+    expect(isSettableAssetStatus("rented")).toBe(false);
+    expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).toEqual([
+      ...ASSET_SETTABLE_STATUSES,
+    ]);
   });
 });
 
@@ -74,6 +104,8 @@ describe("assetHandleProblem", () => {
 
   it("refuses the section's own route names", () => {
     expect(assetHandleProblem("new")).toContain("reserved");
+    // `/assets/kinds` is the taxonomy page; a unit handled "kinds" would hide it.
+    expect(assetHandleProblem("kinds")).toContain("reserved");
   });
 
   it("applies the company slug rules", () => {
@@ -122,22 +154,26 @@ describe("field limits", () => {
 describe("availability", () => {
   it("counts only available units as bookable", () => {
     expect(isAssetAvailable({ status: "available" })).toBe(true);
-    expect(isAssetAvailable({ status: "maintenance" })).toBe(false);
+    expect(isAssetAvailable({ status: "in_workshop" })).toBe(false);
     expect(isAssetAvailable({ status: "retired" })).toBe(false);
+    // Out on hire is unavailable without being out of service.
+    expect(isAssetAvailable({ status: "rented" })).toBe(false);
   });
 
   it("counts a fleet by status", () => {
     const assets = [
       assetRow(),
       assetRow({ id: "a2", status: "available" }),
-      assetRow({ id: "a3", status: "maintenance" }),
+      assetRow({ id: "a3", status: "in_workshop" }),
       assetRow({ id: "a4", status: "retired" }),
+      assetRow({ id: "a5", status: "rented" }),
     ];
 
     expect(summariseAssets(assets)).toEqual({
-      total: 4,
+      total: 5,
       available: 2,
       outOfService: 1,
+      outOnHire: 1,
       retired: 1,
     });
   });
@@ -147,6 +183,7 @@ describe("availability", () => {
       total: 0,
       available: 0,
       outOfService: 0,
+      outOnHire: 0,
       retired: 0,
     });
   });
@@ -168,7 +205,7 @@ describe("availability", () => {
       availabilityLabel([
         assetRow(),
         assetRow({ id: "a2" }),
-        assetRow({ id: "a3", status: "maintenance" }),
+        assetRow({ id: "a3", status: "in_workshop" }),
       ]),
     ).toBe("2 of 3 available");
   });
@@ -176,7 +213,7 @@ describe("availability", () => {
   it("says none when every unit is out of service", () => {
     expect(
       availabilityLabel([
-        assetRow({ status: "maintenance" }),
+        assetRow({ status: "in_workshop" }),
         assetRow({ id: "a2", status: "retired" }),
       ]),
     ).toBe("None of 2 available");
@@ -219,6 +256,61 @@ describe("formatStatusChanged", () => {
     expect(formatStatusChanged("2026-03-04T09:31:00.000Z")).toBe(
       "Mar 4, 2026, 9:31 AM",
     );
+  });
+});
+
+
+describe("the fleet filter's statuses", () => {
+  it("offers every status, rented included", () => {
+    // Filtering is a read. The edit form and the status buttons use the settable
+    // three instead, because a booking is what marks a unit out on hire.
+    expect(ASSET_STATUS_FILTER_OPTIONS.map((option) => option.value)).toEqual(
+      ASSET_STATUSES,
+    );
+    expect(ASSET_STATUS_FILTER_OPTIONS.map((option) => option.value)).toContain(
+      "rented",
+    );
+    expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).not.toContain(
+      "rented",
+    );
+  });
+
+  it("labels them the way the rest of the app does", () => {
+    for (const option of ASSET_STATUS_FILTER_OPTIONS) {
+      expect(option.label).toBe(ASSET_STATUS_LABELS[option.value]);
+    }
+  });
+});
+
+describe("the unit page's tabs", () => {
+  it("names four tabs, the first at the bare handle", () => {
+    expect(ASSET_TABS.map((entry) => entry.label)).toEqual([
+      "Overview",
+      "Components",
+      "Usage",
+      "Service",
+    ]);
+    // Overview is the index: it is what `/assets/<handle>` has always meant, so
+    // old links and the fleet list keep working.
+    expect(ASSET_TABS[0].segment).toBe("");
+  });
+
+  it("builds the links the strip draws", () => {
+    expect(assetTabPath("acme", "bike-1", "overview")).toBe(
+      "/acme/assets/bike-1",
+    );
+    expect(assetTabPath("acme", "bike-1", "components")).toBe(
+      "/acme/assets/bike-1/components",
+    );
+    expect(assetTabPath("acme", "bike-1", "service")).toBe(
+      "/acme/assets/bike-1/service",
+    );
+  });
+
+  it("gives redirects a path with no workspace slug in it", () => {
+    // `redirectWith` prepends `/{slug}/`, so the segment must not repeat it.
+    expect(assetTabSegment("bike-1", "usage")).toBe("assets/bike-1/usage");
+    expect(assetTabSegment("bike-1", "overview")).toBe("assets/bike-1");
   });
 });
 

@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { ReadOnlyNotice } from "@/components/billing/read-only-notice";
 import { FormMessage } from "@/components/form-message";
-import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
+import { PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,22 +16,16 @@ import {
 import { deleteAsset, setAssetStatus } from "@/lib/actions/assets";
 import {
   ASSET_STATUS_OPTIONS,
-  assetStatusLabel,
   formatStatusChanged,
   type Asset,
 } from "@/lib/assets";
-import { getTenantContext } from "@/lib/auth";
-import { isWorkspaceWritable } from "@/lib/billing/entitlements";
 import { isSectionEnabled } from "@/lib/features";
-import { canAdminister, canFrontDesk, canManage } from "@/lib/roles";
+import { canAdminister } from "@/lib/roles";
 import { readParam } from "@/lib/search-params";
-import { createClient } from "@/lib/supabase/server";
 
-import {
-  AssetAvailabilityBadge,
-  AssetStatusBadge,
-} from "../asset-badges";
+import { requireAssetPage } from "../asset-access";
 import { AssetForm } from "../asset-form";
+import { AssetHeader } from "../asset-header";
 
 export const metadata: Metadata = {
   title: "Asset",
@@ -52,6 +44,14 @@ export default function AssetPage({
   );
 }
 
+/**
+ * The overview tab: availability, the editable record, and removal.
+ *
+ * The unit page is a screen split into tabs (see `lib/assets.ts`), and this is
+ * the one the URL without a segment has always meant. The components that hang
+ * off the unit, the usage log and the service state are their own tabs, because
+ * each of them is a list that grows.
+ */
 async function AssetContent({
   params,
   searchParams,
@@ -59,48 +59,20 @@ async function AssetContent({
   params: PageProps<"/[tenant]/assets/[handle]">["params"];
   searchParams: PageProps<"/[tenant]/assets/[handle]">["searchParams"];
 }) {
-  await connection();
-
   const [{ tenant, handle }, query] = await Promise.all([params, searchParams]);
-  const { company, role } = await getTenantContext(tenant);
-
-  if (!isSectionEnabled(company, "assets")) {
-    notFound();
-  }
-
-  const supabase = await createClient();
-
-  // Scoped by company as well as by handle: a handle is only unique inside a
-  // workspace, so this also keeps one tenant's unit out of another's URL.
-  const { data: asset } = await supabase
-    .from("assets")
-    .select("*")
-    .eq("company_id", company.id)
-    .eq("handle", handle)
-    .maybeSingle();
-
-  if (!asset) {
-    notFound();
-  }
-
-  // A lapsed subscription closes every write, and it closes them for everyone:
-  // the front desk's status buttons go with the manager's edit form. Reads stay
-  // open, so the record is still here — the banner explains why it is frozen.
-  const writable = isWorkspaceWritable(company.subscription_status);
-  const canUpdateStatus = canFrontDesk(role) && writable;
-  const canEdit = canManage(role) && writable;
-  const productsEnabled = isSectionEnabled(company, "products");
+  const { company, role, asset, supabase, writable, canUpdateStatus, canEdit } =
+    await requireAssetPage(tenant, handle);
 
   // The picker and the product name both come from the catalogue, so neither is
   // read when the products section is off — RLS would return nothing anyway.
-  const products = productsEnabled
-    ? (
+  const products = isSectionEnabled(company, "products")
+    ? ((
         await supabase
           .from("products")
           .select("id, title, handle")
           .eq("company_id", company.id)
           .order("title", { ascending: true })
-      ).data ?? []
+      ).data ?? [])
     : [];
 
   const product = asset.product_id
@@ -109,32 +81,7 @@ async function AssetContent({
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 p-6 lg:p-10">
-      <PageHeader
-        title={asset.name}
-        description={
-          <>
-            <span className="font-mono">/{asset.handle}</span>
-            {" · "}
-            {assetStatusLabel(asset.status)}
-            {asset.serial ? (
-              <>
-                {" · "}
-                <span className="font-mono">{asset.serial}</span>
-              </>
-            ) : null}
-          </>
-        }
-        actions={
-          <Button variant="outline" asChild>
-            <Link href={`/${company.slug}/assets`}>All assets</Link>
-          </Button>
-        }
-      />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <AssetStatusBadge status={asset.status} />
-        <AssetAvailabilityBadge asset={asset} />
-      </div>
+      <AssetHeader slug={company.slug} asset={asset} current="overview" />
 
       {writable ? null : (
         <ReadOnlyNotice
@@ -163,6 +110,7 @@ async function AssetContent({
     </div>
   );
 }
+
 
 /**
  * Availability, and the buttons that change it.
@@ -193,9 +141,11 @@ function AvailabilityCard({
         <CardDescription>
           {asset.status === "available"
             ? "In service, and counted in what this workspace can promise."
-            : asset.status === "maintenance"
+            : asset.status === "in_workshop"
               ? "Out of action, and excluded from what this workspace can promise until it is marked available again."
-              : "Retired from the fleet. Kept so its history stays readable, and never booked."}
+              : asset.status === "rented"
+                ? "Out on hire. It counts as bookable again when the booking that holds it is completed or cancelled."
+                : "Retired from the fleet. Kept so its history stays readable, and never booked."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -225,7 +175,15 @@ function AvailabilityCard({
           </div>
         </dl>
 
-        {canUpdateStatus ? (
+        {asset.status === "rented" ? (
+          // The buttons would all be refused by `setAssetStatus()`, which is the
+          // right rule — a hire owns the unit until it comes back — so the card
+          // says why instead of offering three writes that cannot happen.
+          <p className="text-muted-foreground text-sm">
+            The booking holding this unit sets its status. Complete or cancel the
+            booking to bring it back into the fleet.
+          </p>
+        ) : canUpdateStatus ? (
           <div className="flex flex-wrap items-end gap-2">
             {others.map((option) => (
               <form key={option.value} action={setAssetStatus}>

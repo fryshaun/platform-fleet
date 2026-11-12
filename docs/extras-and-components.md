@@ -1,0 +1,396 @@
+# Extras and components — build sheet
+
+This file is the contract for the second bookings pass, written before the work
+so it cannot quietly drift. It follows `docs/bookings-module.md`: same headings,
+same rules, and the same deal — if a step turns out to be wrong, change this file
+in the same commit as the code.
+
+Five slices, in order, each ending green:
+
+| Stage | What it adds | Migrations |
+| --- | --- | --- |
+| 1 | The extras catalogue, its per-product scope, and the extras a line takes | 15, 16 |
+| 2 | Stock: how many of an extra the shop actually has | 17 |
+| 3 | Asset components and their taxonomy (`component_kinds`) | 18, 19 |
+| 4 | A booking line that holds a component rather than a unit | 20 |
+| 5 | Usage logs — hours and distance against a unit | 21 |
+| 6 | Service intervals, service events and the derived service state | 22, 23 |
+| 7 | `asset_status`: `in_workshop` and `rented` | 24, 25 |
+
+## Decisions
+
+**Extras are priced `per_booking` or `per_day`.** `per_day` multiplies by the
+booking window, counted in whole days with a floor of one — a same-day collection
+is a day's hire. Both live in `addon_price_kind`, and `addonChargeCents` is the
+only place the arithmetic happens.
+
+**An extra's scope is a per-product allowlist, and no rows means every product.**
+`addon_products(company_id, addon_id, product_id)`. A workspace that never
+switched the products section on has no products to scope to, and a line may name
+no product at all; both cases have to keep working, which is what "unscoped"
+buys. `set_addon_products(addon_id, product_ids)` replaces the whole list in one
+statement, because two client writes could fail between each other and leave an
+extra scoped to nothing — the one dangerous failure this design has.
+
+**Extras hang off the line, never off the booking.** `booking_line_addons` has
+`line_item_id` and no `booking_id`. The line is the only row that knows the
+product, and the product is what decides the offer. A second column would let a
+row claim a booking its line does not belong to, and the money column on the
+board reads the line anyway.
+
+**A line's product cannot change while it carries extras.**
+`booking_line_items_product_guard` refuses it. The alternative — cascading the
+extras away — deletes priced rows the renter already agreed to. One extra click
+for the desk in a rare case is the cheaper mistake.
+
+**A variant matches its parent, and only one level.** A helmet scoped to
+"Mountain bike" covers the medium and the large; it does not cover a *sibling*
+variant scoped elsewhere. `products.parent_id` is a variant pointer and migration
+03 already refuses a second level.
+
+**The price is snapshotted, and the window is not.** `booking_line_addons_snapshot`
+copies `price_cents` and `price_kind` on insert and re-imposes them on update, so
+raising the catalogue price never re-prices an agreed hire. `booking_line_items`
+does the opposite with its window on purpose: the window is the booking's, and a
+line whose dates drifted would break the exclusion constraint.
+
+**Booking-wide charges are a product line, not a booking-level extras row.**
+Delivery, setup, a damage waiver for the whole hire: these are simple ecommerce
+products with no `parent_id`, added as an ordinary line. That keeps one shape for
+money on a booking and needs no column that means "this line is not a thing".
+
+**Stock is derived, then locked, never decremented.**
+`check_addon_availability(addon_id, starts_on, ends_on, exclude_line_id)` counts
+what other blocking lines took over the window; the insert trigger takes
+`for update` on the add-on row and refuses an oversell. A stored counter would
+have to be repaired after every cancellation, and the repair would be wrong
+whenever two people booked at once.
+
+**A component is bookable only while it is not fitted.** A fitted component is
+already on a unit that goes out; booking it separately would promise the same
+thing twice. Fitting a component into a unit is refused while the component is
+booked, and booking a unit is refused while the unit is out with a booked
+component — the same "one thing, one place" rule the exclusion constraint states
+for units.
+
+**Usage readings are incremental, not a cumulative odometer.** A cumulative
+reading has to be monotonically increasing across every row ever entered, which
+one typo breaks forever; "hours since the last reading" is what the mechanic
+actually writes down.
+
+**Service intervals hang off `component_kinds`, not off each component.** A shop
+services every "full suspension" frame at the same interval; per-component
+intervals would be copied wrongly once and never noticed.
+
+**Taxonomy is a company-scoped table, mirroring `product_categories`.**
+`component_kinds(company_id, name, handle, position)`, flat, `<select>`-picked.
+The precedent is `20260101000200_products.sql`; a second taxonomy shape would be
+a second set of policies for no gain.
+
+**`in_workshop` is the label "In the workshop".** The existing `maintenance` value
+is renamed so the enum and the UI say the same thing, and `rented` is written only
+by a trigger from the bookings beneath it — availability stays derived, never
+copied, the rule migration 04 already states for counts.
+
+## In this slice
+
+Stages 1 and 2. Stages 3–7 are under *Stages 3–7 — the screens* and landed in
+their own commits.
+
+**Stage 1 — the catalogue, its scope and the line extras**
+
+- Migration 15: `addon_price_kind` and `addon_status`, `addons`,
+  `addon_products`, `booking_line_addons`, `booking_line_items_company_id_unique`
+  (the composite key the extras point at), the snapshot and product-guard
+  triggers, `set_addon_products`, and the RLS policies — on the **bookings**
+  section, not products.
+- Migration 16: Guard 5 for the three new tables.
+- `lib/supabase/types.ts`: `AddonPriceKind`, `AddonStatus`, three tables,
+  `set_addon_products`.
+- `lib/addons.ts` — client-safe: price kinds, statuses, handle and name rules,
+  the quantity ceiling, `addonChargeCents`, `lineAddonsTotal`,
+  `bookingAddonsTotal`, `addonPriceLabel`, `isAddonOfferedFor`,
+  `addonScopeByAddon`, `addonsForLine`, `parseAddonDraft`.
+- `lib/actions/addons.ts` — `createAddon`, `updateAddon`, `setAddonStatus`,
+  `deleteAddon`, `addLineAddon`, `updateLineAddon`, `removeLineAddon`.
+- `app/[tenant]/bookings/add-ons/{page,addon-deck,addon-fields}.tsx`, the extras
+  block on `line-items-section.tsx`, the booking total including extras, and an
+  **Extras** button on the board.
+- Tests: the `extras` block in `tests/db/schema.test.ts`,
+  `tests/unit/addons.test.ts`, and the `addonRow`/`lineAddonRow` fixtures.
+
+**Stage 2 — stock**
+
+- Migration 17: `addons.track_stock`, `addons.quantity_on_hand`,
+  `check_addon_availability(company, addon, from, to, exclude_line_item)`,
+  the snapshot trigger rebuilt with the `for update` lock and the stock count,
+  and `bookings_addon_stock_guard` on `bookings` status changes.
+- `lib/addons.ts`: `MAX_ADDON_STOCK`, `addonStockProblem`, `addonStockLabel`,
+  and `parseAddonDraft` reading the checkbox and the count.
+- `lib/actions/addons.ts`: `addLineAddon` asks the advisory availability
+  function first, so an oversell arrives as "only one of those is free".
+- The catalogue form gained the stock block; the deck card shows
+  "Unlimited" or "6 in stock".
+- Tests: the `add-on stock` block in `tests/db/schema.test.ts` and the stock
+  block in `tests/unit/addons.test.ts`.
+
+**Stage 3 — components and their taxonomy**
+
+- Migration 18: `component_kinds` (company-scoped, flat, like
+  `product_categories`) and `asset_components` (name, serial, nullable
+  `kind_id`, nullable `asset_id`, half-open `[fitted_on, removed_on)`), the
+  partial unique index that allows one fitted part of a kind per unit, and the
+  RLS policies on the **assets** section.
+- Migration 19: Guard 5 for both tables.
+- `lib/components.ts` — client-safe: kind handle/name rules,
+  `parseComponentKindDraft`, `componentNameProblem`, `componentSerialProblem`,
+  `fittedWindowProblem`, `isFitted`, `componentWhereLabel`,
+  `componentsForAsset`, `parseComponentDraft`.
+- `lib/actions/asset-components.ts` — `createComponentKind`,
+  `updateComponentKind`, `deleteComponentKind`, `createComponent`,
+  `updateComponent`, `removeComponent`, `deleteComponent`.
+- Tests: the `components` block in `tests/db/schema.test.ts`,
+  `tests/unit/components.test.ts`, and the `componentKindRow`/`componentRow`
+  fixtures.
+
+The screens for this stage — `/assets/kinds` and the components card on a unit —
+land with the other screens in the final gate, so the rules and the schema are
+reviewed before anything is drawn on top of them.
+
+**Stage 4 — components on a booking line**
+
+- Migration 20: `booking_line_items.component_id` with a composite FK
+  (`on delete set null (component_id)`), `booking_line_items_one_holder`
+  (`component_id is null or asset_id is null`), the partial exclusion constraint
+  on `component_id`, `booking_line_items_component_guard` and
+  `asset_components_booking_guard`.
+- `lib/supabase/types.ts`: the new column on all three shapes.
+- Tests: the `components on a booking line` block in `tests/db/schema.test.ts`.
+
+The two guards are complements — a part may be booked only while un-fitted, and
+may be fitted only while un-booked — so the third case the plan listed,
+"a unit cannot be booked while it carries a booked component", cannot arise and
+is deliberately not written. Unreachable code that looks like a guarantee is
+worse than a sentence saying why it is unnecessary.
+
+**Stage 5 — usage logs**
+
+- Migration 21: `asset_usage_logs` (incremental `hours` / `distance_km`, a
+  `logged_on` day, `hours > 0 or distance_km > 0`) and its policies on the
+  **assets** section.
+
+**Stage 6 — service intervals**
+
+- Migration 22: `interval_days` / `interval_km` / `interval_hours` on
+  `component_kinds`, `component_service_events`, and the derived
+  `component_service_status` view (`ok` / `due_soon` at 80% / `overdue`, with
+  usage clipped to the fitted window and to the last service).
+- Migration 23: Guard 5 for both new tables.
+
+**Stage 7 — rented**
+
+- Migration 24: `maintenance` renamed to `in_workshop`, `rented` added.
+- Migration 25: `assets.status_before_rent`, `refresh_asset_rented()`, the
+  `booking_line_items_asset_status` trigger that calls it, and the one-off
+  backfill.
+- `lib/assets.ts`: `ASSET_STATUSES` and the labels ("In the workshop",
+  "Out on hire"), `ASSET_SETTABLE_STATUSES` (three, never `rented`),
+  `isSettableAssetStatus`, and `summariseAssets` counting `outOnHire` — with the
+  `else` branch that would have counted `rented` as retired removed.
+- `lib/actions/assets.ts`: `setAssetStatus` refuses `rented` and refuses any
+  change while a unit is out; `deleteAsset` refuses while a unit is out.
+- Tests: the `usage logs and servicing` and `rented is derived` blocks in
+  `tests/db/schema.test.ts`, plus the status tests in `tests/unit/assets.test.ts`
+  and the action tests.
+
+## Stages 3–7 — the screens
+
+The rules, the schema and the live proofs landed first; this is the UI that reads
+them. Four commits and one fix, in order.
+
+**The taxonomy — `/assets/kinds`**
+
+- `lib/components.ts` grew the interval rules: `SERVICE_INTERVAL_UNITS`,
+  `SERVICE_INTERVAL_FIELDS` (the labels, hints and steps the form renders from),
+  `intervalFieldName`, `parseIntervalValue` (empty and `0` both mean "not
+  measured", and both store `null`), `intervalInputValue`, `describeInterval`,
+  `fittedWindowLabel`, `NEW_KIND_FORM_ID`, `NEW_COMPONENT_FORM_ID`.
+  `ComponentKindDraft` and `parseComponentKindDraft` read the three columns —
+  until then the form silently dropped them.
+- `app/[tenant]/assets/kinds/{page,kind-deck,kind-fields}.tsx`: the categories
+  pattern (a deck of forms, a `FormSheet` for the new one, `?ok=`/`?error=`),
+  manager-only, with a read-only workspace redirected to the fleet.
+- `NAV_ICONS.kinds` and a manager-only **Kinds** entry beside Assets in the rail,
+  exactly as Categories sits beside Products.
+- `"kinds"` joined `RESERVED_ASSET_HANDLES`, so no unit can shadow the page.
+
+**The unit page became tabs** — `/assets/[handle]` plus `/components`, `/usage`
+and `/service`.
+
+- `lib/assets.ts`: `ASSET_TABS`, `AssetTab`, `assetTabPath` and
+  `assetTabSegment`, modelled on `SETTINGS_TABS`/`settingsSegment`. Overview is
+  the index (the bare handle), so old links and the fleet list still land.
+- `app/[tenant]/assets/asset-header.tsx`, `asset-tabs.tsx` and
+  `asset-access.ts` (`requireAssetPage`): the header draws the strip and the
+  badges, and the helper answers the four questions every tab asks — section on,
+  unit exists, writable, who may write — so a new tab cannot forget one.
+- **Components**: `components/{page,components-section,component-fields}.tsx`. A
+  row is a form; **Remove** posts `removed_on` through `removeComponent`, and
+  **Delete** is manager-only. Fitting is front-desk work, hence `canFit` beside
+  `canEdit` in `requireAssetPage()`.
+- **Usage**: `lib/usage.ts` (`parseUsageDraft`, `summariseUsage`, `usageSummary`,
+  `formatHours`, `formatDistance`, `NEW_USAGE_FORM_ID`), `lib/actions/usage.ts`
+  (`createUsageLog`, `updateUsageLog`, `deleteUsageLog` — the delete being the
+  manager's), and `usage/{page,usage-section,usage-fields}.tsx`.
+- **Service**: `lib/servicing.ts` (`parseServiceEventDraft`,
+  `serviceStatusLabel`, `serviceStatusRank`, `serviceIntervalLabel`,
+  `serviceProgressLabel`, `statusForComponent`, `serviceEventsForComponent`,
+  `serviceSummary`, `NEW_SERVICE_FORM_ID`), `lib/actions/servicing.ts`
+  (`createServiceEvent`, `deleteServiceEvent`), and
+  `service/{page,service-section,service-fields,service-badge}.tsx`.
+- Tests: `tests/actions/asset-components.test.ts`, `tests/unit/usage.test.ts`,
+  `tests/actions/usage.test.ts`, `tests/unit/servicing.test.ts`,
+  `tests/actions/servicing.test.ts`, and the tab/handle/filter cases in
+  `tests/unit/assets.test.ts`. No screen tests: the repo has no RTL or jsdom, so
+  every rule the screens depend on lives in a `lib/*` module and is tested there.
+
+**The rented state, round the whole UI**
+
+- `ASSET_STATUS_FILTER_OPTIONS` — all four statuses, so a unit out on hire can be
+  found. The edit form and the status buttons keep the settable three.
+- The fleet summary counts `out on hire` separately from `out of action`.
+- `AssetStatusBadge` gives `rented` its own (quiet, filled) pill.
+- The availability card explains a hire's status instead of offering three
+  buttons `setAssetStatus()` would refuse.
+- The edit form shows the status as a fact on a rented unit and posts none, and
+  `updateAsset` reads the stored row first: a status is written only when the
+  form sent one *and* the unit is not out.
+
+**Bookings** — the board's per-booking figure now includes the line extras (it
+was quoting the lines alone while the booking page quoted both), and a line can
+book a single part through `assignComponent` and its picker.
+
+Still out: the renter-facing API, renter email, deposits.
+
+## Order of work
+
+Each step ends green — `pnpm verify` plus a transactional `psql` proof — before
+the next starts.
+
+1. **Migration 15** — enums, `addons`, `addon_products`, the composite key on
+   `booking_line_items`, `booking_line_addons`, the two triggers,
+   `set_addon_products`, RLS, grants.
+2. **Migration 16** — Guard 5.
+3. **Types and `lib/addons.ts`**, then **`lib/actions/addons.ts`**.
+4. **Screens**, then the **tests**, then the `psql` proof.
+5. **Stage 2** — `track_stock`, `quantity_on_hand`,
+   `check_addon_availability(addon_id, starts_on, ends_on, exclude_line_id)` and
+   `bookings_addon_stock_guard`; the snapshot trigger grows its `for update`
+   count. Stop for review before stage 3.
+6. **Stage 3** — `component_kinds`, `asset_components`, migration 19 (Guard 5).
+7. **Stage 4** — `booking_line_items.component_id` and its partial exclusion
+   constraint.
+8. **Stage 5** — `asset_usage_logs`.
+9. **Stage 6** — intervals on the kind, `component_service_events`,
+   `component_service_status` (`ok` / `due_soon` at 80% / `overdue`).
+10. **Stage 7** — the enum change, `status_before_rent`, `refresh_asset_rented`,
+    the backfill, and `summariseAssets` learning `outOnHire`.
+
+## Rules the new code must keep
+
+- **Half-open windows, `[starts_on, ends_on)`, everywhere.** The stock check, the
+  repo helpers and the exclusion constraint all read the same arithmetic.
+- **The database has the last word.** Every action checks the section and the
+  tier so a refusal arrives as a sentence, and RLS repeats it.
+- **Money is derived per render.** `addonChargeCents` and `bookingAddonsTotal`
+  are the only totals; nothing stores a sum.
+- **A snapshot is copied once.** Never re-read the catalogue price for a row that
+  already exists.
+- **The catalogue asks about the `bookings` section.** A policy on `addons` that
+  named `products` would hide the extras from every rental-only workspace.
+- **`anon` gets nothing.** Every new function is revoked by name and granted to
+  `authenticated` and `service_role`; trigger-only functions are granted to
+  `service_role` alone.
+
+## Gotchas worth remembering
+
+- **A cancelled line does not claim stock.** The insert trigger checks only when
+  the line's `blocks_stock` is true, so a cancelled or returned booking can be
+  edited freely; `bookings_addon_stock_guard` re-checks everything when the
+  booking starts holding stock again. Gating on the *new* row's line rather than
+  on its add-on is what keeps those two behaviours from contradicting.
+- **The `for update` really is the guard.** The live proof ran two sessions: the
+  first held the add-on row inside an open transaction for four seconds, the
+  second blocked for three and was then refused with "Only 0 of this extra are
+  free". A comment saying "concurrency is handled" would not have shown that.
+- **`rented` sorts last.** An enum's order is fixed when it is created, and
+  `rented` was added after `retired`. The `?status=` sort on the fleet page reads
+  the database's order, so rented units appear after retired ones — worth knowing
+  before somebody reports it as a bug.
+- **The `else` in `summariseAssets` was the trap.** It counted every status it had
+  not heard of as retired, so `rented` would have inflated the retired figure and
+  the availability sentence with it. Every branch is now explicit, and the closed
+  union makes a new status a compile error instead of a silent wrong count.
+- **`TG_OP` is uppercase in PL/pgSQL** — `'INSERT'`, `'UPDATE'`, not lowercase.
+  A lowercase comparison silently skips the branch: the price is never copied and
+  the scope is never checked, and every insert still succeeds. The first live run
+  of stage 1 caught exactly this, which is why `tests/db/schema.test.ts` now pins
+  the uppercase form and fails on the lowercase one.
+- **`booking_line_items` had no `unique (company_id, id)`** until migration 15,
+  so the composite foreign key could not exist before it. A new migration adds the
+  constraint; editing an applied one would break every deployed database.
+- **A blank-product line is not a bug.** `parseLineItemDraft` already accepts
+  `product_id: null` — "any unit" — and only an *unscoped* extra may go on it.
+- **`booking_line_addons` must never grow a `booking_id`.** The schema test reads
+  the `create table` statement and fails if the column appears.
+- **`updateAddon` sends the scope as a marker (`scope=1`).** Without the marker
+  the list in the form is not the truth, and sending an empty list would widen a
+  scoped extra to every product.
+- **`23514` is not translated in `lib/actions/addons.ts`.** The trigger writes a
+  sentence for a person; a generic "values out of range" would throw it away.
+- **The editor writes in ~6 000-character chunks.** Long SQL and lib files are
+  staged: the header first, then sections appended at a banner comment, then the
+  file re-read to check the order. An `insert_line` at the wrong offset silently
+  splits an object literal in half.
+
+### From the screens
+
+- **`component_service_status` coalesces every interval to `0`.** `0` means "not
+  measured this way", so it must never be rendered as "every 0 km". The tab reads
+  the view's numbers through `describeInterval()`, which already says "No interval
+  set" for zeroes, and `serviceIntervalLabel` exists only to say so out loud.
+- **The view has no `kind_id` and no `removed_on`.** A card that needs the kind or
+  the fitted window joins on `component_id` to `asset_components`; reading either
+  from the view would have meant another migration.
+- **A part that came off keeps its row, its history and its view row** — including
+  a status. The Service tab shows the badge only for fitted parts and counts only
+  fitted parts in the summary, because "overdue" on a fork in the parts bin is a
+  false alarm that teaches a shop to ignore the tab.
+- **`parseComponentKindDraft` dropped the intervals for a whole stage.** The
+  columns existed, the view read them, and the form silently wrote none — the
+  draft type was the bug, not the action. A screen that adds fields to a table
+  has to add them to the parser *and* to the fixture expectations.
+- **A redirect must be named, not spelled.** `assetTabSegment(handle, "usage")`
+  builds `assets/<handle>/usage` for `redirectWith`, which prepends the slug. A
+  hand-written path is how a form starts returning to the wrong tab after a
+  rename.
+- **`in("id", [])` is an error, not an empty result.** The unit's Service tab skips
+  both the events query and the board skips the extras query when there is nothing
+  to ask about.
+- **The filter and the form want different lists.** `rented` is readable and not
+  settable: `ASSET_STATUS_FILTER_OPTIONS` offers four, `ASSET_STATUS_OPTIONS`
+  offers three, and `setAssetStatus()` refuses `rented` by name so a forged form
+  gets a sentence.
+- **`updateAsset` could un-rent a unit.** The status select defaulted to
+  "Available" and the action wrote whatever it posted, so saving a name on a
+  rented unit cleared the flag until `refresh_asset_rented()` put it back. The
+  form now posts no status for a rented unit, and the action reads the stored row
+  first — a form is not the authority on a field a trigger owns.
+- **The board quoted the lines only.** The booking page added
+  `bookingAddonsTotal()` and the board did not, so the same hire had two totals.
+  Both now read `booking_line_addons`; the board does it in one query for every
+  visible booking rather than one per card.
+- **`booking_line_items.component_id` is not capacity.** The exclusion constraint
+  is on `asset_id`, so `assignComponent` is a naming write like the rider — it
+  does not call `check_asset_availability()`, and a test asserts the RPC stays
+  untouched.

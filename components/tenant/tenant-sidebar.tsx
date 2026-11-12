@@ -42,20 +42,30 @@ export async function TenantSidebar({ slug }: { slug: string }) {
         icon: key,
       };
 
-      // Categories belong to the products section but are a screen of their
-      // own, and a manager-only one: they sit next to Products in the rail
-      // rather than behind a link on the catalogue page, and a role that cannot
+      if (!canManage(role)) return [item];
+
+      // Categories and kinds belong to their section but are screens of their
+      // own, and manager-only ones: they sit next to Products and Assets in the
+      // rail rather than behind a link on those pages, and a role that cannot
       // open them does not see the icon.
-      return key === "products" && canManage(role)
-        ? [
+      switch (key) {
+        case "products":
+          return [
             item,
             {
               href: `${item.href}/categories`,
               label: "Categories",
               icon: "categories",
             },
-          ]
-        : [item];
+          ];
+        case "assets":
+          return [
+            item,
+            { href: `${item.href}/kinds`, label: "Kinds", icon: "kinds" },
+          ];
+        default:
+          return [item];
+      }
     }),
   ];
 

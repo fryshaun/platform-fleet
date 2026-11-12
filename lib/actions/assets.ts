@@ -16,7 +16,7 @@ import {
   assetHandleProblem,
   assetNameProblem,
   deriveAssetHandle,
-  isAssetStatus,
+  isSettableAssetStatus,
   serialProblem,
 } from "@/lib/assets";
 import type { AssetStatus } from "@/lib/supabase/types";
@@ -44,7 +44,12 @@ type AssetDraft = {
   name: string;
   handle: string;
   serial: string | null;
-  status: AssetStatus;
+  /**
+   * `null` when the form offered no status — a rented unit's does not, because
+   * the booking owns it. Creating falls back to `available`; editing keeps the
+   * stored value.
+   */
+  status: AssetStatus | null;
   product_id: string | null;
   notes: string | null;
 };
@@ -108,8 +113,11 @@ function readAssetDraft(
     return { error: handleProblem };
   }
 
+  // Empty means "leave the stored status alone". `rented` is not settable — the
+  // database writes it from the bookings beneath the unit — so a posted value
+  // that is not one of the three is still a mistake.
   const status = readField(formData, "status");
-  if (!isAssetStatus(status)) {
+  if (status !== "" && !isSettableAssetStatus(status)) {
     return { error: "Choose a valid status." };
   }
 
@@ -124,7 +132,7 @@ function readAssetDraft(
       name,
       handle,
       serial: serial || null,
-      status,
+      status: status === "" ? null : status,
       product_id: readField(formData, "product_id") || null,
       notes: readField(formData, "notes") || null,
     },
@@ -143,8 +151,13 @@ export async function createAsset(formData: FormData) {
     redirectWith(slug, "assets", { error: parsed.error });
   }
 
+  // A new unit has no booking behind it, so it needs a status and `available` is
+  // the one a fleet starts in.
+  const { status, ...rest } = parsed.draft;
+
   const { error } = await context.supabase.from("assets").insert({
-    ...parsed.draft,
+    ...rest,
+    status: status ?? "available",
     company_id: context.company.id,
   });
 
@@ -181,9 +194,33 @@ export async function updateAsset(formData: FormData) {
     redirectWith(slug, back, { error: parsed.error });
   }
 
+  const { status, ...rest } = parsed.draft;
+
+  /**
+   * The status is the one field that may belong to a booking rather than to this
+   * form.
+   *
+   * `refresh_asset_rented()` (migration 25) writes `rented` from the lines
+   * beneath a unit, so an edit that posted a status for a rented unit would
+   * un-rent it behind the booking's back — and the form for a rented unit posts
+   * none at all. Reading the stored row first is what makes that safe: a status
+   * is written only when the form sent one *and* the unit is not out.
+   */
+  const { data: current } = await context.supabase
+    .from("assets")
+    .select("status")
+    .eq("id", assetId)
+    .eq("company_id", context.company.id)
+    .maybeSingle();
+
+  const payload =
+    status === null || current?.status === "rented"
+      ? rest
+      : { ...rest, status };
+
   const { error } = await context.supabase
     .from("assets")
-    .update(parsed.draft)
+    .update(payload)
     .eq("id", assetId)
     .eq("company_id", context.company.id);
 
@@ -222,8 +259,29 @@ export async function setAssetStatus(formData: FormData) {
   }
 
   const status = readField(formData, "status");
-  if (!isAssetStatus(status)) {
-    redirectWith(slug, back, { error: "Choose a valid status." });
+  if (!isSettableAssetStatus(status)) {
+    redirectWith(slug, back, {
+      error:
+        status === "rented"
+          ? "A unit is marked out on hire by its booking, not by hand."
+          : "Choose a valid status.",
+    });
+  }
+
+  // A rented unit is out with a renter. Its status belongs to the booking until
+  // that booking comes back, so the desk cancels or completes the hire first.
+  const { data: current } = await context.supabase
+    .from("assets")
+    .select("status")
+    .eq("id", assetId)
+    .eq("company_id", context.company.id)
+    .maybeSingle();
+
+  if (current?.status === "rented") {
+    redirectWith(slug, back, {
+      error:
+        "That unit is out on hire. Complete or cancel the booking before changing its status.",
+    });
   }
 
   const { error } = await context.supabase
@@ -256,6 +314,23 @@ export async function deleteAsset(formData: FormData) {
   }
 
   const back = assetPath(formData);
+
+  // A unit that is out is still earning; deleting its row while a booking holds
+  // it would drop the hire's history. Retiring is the softer option anyway.
+  const { data: current } = await context.supabase
+    .from("assets")
+    .select("status")
+    .eq("id", assetId)
+    .eq("company_id", context.company.id)
+    .maybeSingle();
+
+  if (current?.status === "rented") {
+    redirectWith(slug, back, {
+      error:
+        "That unit is out on hire. Complete or cancel the booking before deleting it.",
+    });
+  }
+
   const { error } = await context.supabase
     .from("assets")
     .delete()
