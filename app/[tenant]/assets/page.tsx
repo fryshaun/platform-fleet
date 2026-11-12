@@ -11,7 +11,7 @@ import { PageHeader, PageSkeleton } from "@/components/tenant/page-header";
 import { Button } from "@/components/ui/button";
 import {
   ASSET_SORT_OPTIONS,
-  ASSET_STATUS_OPTIONS,
+  ASSET_STATUS_FILTER_OPTIONS,
   availabilityLabel,
   isAssetStatus,
   NEW_ASSET_FORM_ID,
@@ -140,7 +140,7 @@ async function AssetsContent({
     products.map((product) => [product.id, product.title]),
   );
 
-  const { total, outOfService, retired } = summariseAssets(assets);
+  const { total, outOfService, outOnHire, retired } = summariseAssets(assets);
   const summary =
     total === 0
       ? filtered
@@ -149,6 +149,10 @@ async function AssetsContent({
       : [
           `${total} unit${total === 1 ? "" : "s"}`,
           availabilityLabel(assets),
+          // Out on hire is not "out of action": the unit is working, it is just
+          // not here. Worth its own figure, because a shop reading "3 of 5
+          // available" asks where the other two went.
+          outOnHire > 0 ? `${outOnHire} out on hire` : null,
           outOfService > 0 ? `${outOfService} out of action` : null,
           retired > 0 ? `${retired} retired` : null,
         ]
@@ -210,7 +214,7 @@ async function AssetsContent({
             className={SELECT_CLASSES}
           >
             <option value="">Any status</option>
-            {ASSET_STATUS_OPTIONS.map((option) => (
+            {ASSET_STATUS_FILTER_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

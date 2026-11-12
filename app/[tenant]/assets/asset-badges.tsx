@@ -12,7 +12,9 @@ import type { AssetStatus } from "@/lib/supabase/types";
  * The status pill shared by the list and the asset page.
  *
  * "Available" is the quiet state a fleet is normally in, so only the states that
- * need a decision — out of action, retired — get a louder badge.
+ * need a decision — out of action, retired — get a louder badge. `rented` is
+ * neither: the unit is working, it is simply out with a customer, so it gets a
+ * filled but quiet pill that reads as a fact rather than a problem.
  */
 export function AssetStatusBadge({ status }: { status: AssetStatus }) {
   return (
@@ -22,7 +24,9 @@ export function AssetStatusBadge({ status }: { status: AssetStatus }) {
           ? "brand"
           : status === "in_workshop"
             ? "destructive"
-            : "outline"
+            : status === "rented"
+              ? "secondary"
+              : "outline"
       }
     >
       {assetStatusLabel(status)}

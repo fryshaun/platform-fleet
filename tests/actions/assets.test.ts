@@ -268,10 +268,33 @@ describe("updateAsset", () => {
       product_id: PRODUCT_ID,
       notes: "Front brake rubs.",
     });
-    expect(mock.argsFor("assets", "eq")).toEqual([
-      ["id", ASSET_ID],
-      ["company_id", COMPANY_ID],
+    // The write is the second chain: the first read the stored status, because a
+    // rented unit's status belongs to its booking.
+    const [, write] = mock.chainsFor("assets");
+    expect(write.filter((call) => call.method === "eq")).toEqual([
+      { method: "eq", args: ["id", ASSET_ID] },
+      { method: "eq", args: ["company_id", COMPANY_ID] },
     ]);
+  });
+
+  it("cannot un-rent a unit by saving the rest of its record", async () => {
+    // The form for a rented unit posts no status; even if one were forged the
+    // stored `rented` wins, because the booking owns the status.
+    const mock = setup("manager", {
+      assets: (calls) => {
+        const isUpdate = calls.some((call) => call.method === "update");
+        return isUpdate
+          ? { data: null, error: null }
+          : { data: { status: "rented" }, error: null };
+      },
+    });
+
+    await captureRedirect(() =>
+      updateAsset(formDataOf({ ...EDIT, status: "available" })),
+    );
+
+    expect(mock.argFor("assets", "update")).not.toHaveProperty("status");
+    expect(mock.argFor("assets", "update")).toMatchObject({ name: "Bike 1" });
   });
 
   it("confirms the save on the unit's page", async () => {

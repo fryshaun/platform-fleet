@@ -4,6 +4,7 @@ import {
   ASSET_SETTABLE_STATUSES,
   ASSET_SORT_OPTIONS,
   ASSET_STATUS_LABELS,
+  ASSET_STATUS_FILTER_OPTIONS,
   ASSET_STATUS_OPTIONS,
   ASSET_STATUSES,
   ASSET_TABS,
@@ -258,6 +259,28 @@ describe("formatStatusChanged", () => {
   });
 });
 
+
+describe("the fleet filter's statuses", () => {
+  it("offers every status, rented included", () => {
+    // Filtering is a read. The edit form and the status buttons use the settable
+    // three instead, because a booking is what marks a unit out on hire.
+    expect(ASSET_STATUS_FILTER_OPTIONS.map((option) => option.value)).toEqual(
+      ASSET_STATUSES,
+    );
+    expect(ASSET_STATUS_FILTER_OPTIONS.map((option) => option.value)).toContain(
+      "rented",
+    );
+    expect(ASSET_STATUS_OPTIONS.map((option) => option.value)).not.toContain(
+      "rented",
+    );
+  });
+
+  it("labels them the way the rest of the app does", () => {
+    for (const option of ASSET_STATUS_FILTER_OPTIONS) {
+      expect(option.label).toBe(ASSET_STATUS_LABELS[option.value]);
+    }
+  });
+});
 
 describe("the unit page's tabs", () => {
   it("names four tabs, the first at the bare handle", () => {

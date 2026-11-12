@@ -54,6 +54,19 @@ export const ASSET_STATUS_OPTIONS = ASSET_SETTABLE_STATUSES.map((status) => ({
         : "Has left the fleet. Kept so its history stays readable.",
 }));
 
+/**
+ * The statuses the fleet filter offers.
+ *
+ * All four, `rented` included: filtering is a read, and "what is out on hire
+ * today?" is one of the questions the list is opened to answer. The edit form and
+ * the status buttons use `ASSET_STATUS_OPTIONS` instead, because a person may not
+ * *set* `rented` — a booking does that.
+ */
+export const ASSET_STATUS_FILTER_OPTIONS = ASSET_STATUSES.map((status) => ({
+  value: status,
+  label: ASSET_STATUS_LABELS[status],
+}));
+
 export function isAssetStatus(value: unknown): value is AssetStatus {
   return (
     typeof value === "string" &&

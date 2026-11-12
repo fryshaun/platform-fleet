@@ -107,21 +107,38 @@ export function AssetFields({
         </p>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor={fieldId("status")}>Status</Label>
-        <select
-          id={fieldId("status")}
-          name="status"
-          defaultValue={asset?.status ?? "available"}
-          className={SELECT_CLASSES}
-        >
-          {ASSET_STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      {asset?.status === "rented" ? (
+        // A rented unit's status belongs to its booking (migration 25 writes it
+        // from the lines beneath the unit), so the form does not offer it. The
+        // action keeps the stored status when none is posted, which is why
+        // saving the rest of the record cannot quietly un-rent the unit.
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Status</p>
+          <p className="text-brand-forest bg-brand-lime inline-flex rounded-md px-2 py-0.5 text-sm">
+            Out on hire
+          </p>
+          <p className="text-muted-foreground text-xs">
+            Set by the booking that holds it, and cleared when that booking is
+            completed or cancelled.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <Label htmlFor={fieldId("status")}>Status</Label>
+          <select
+            id={fieldId("status")}
+            name="status"
+            defaultValue={asset?.status ?? "available"}
+            className={SELECT_CLASSES}
+          >
+            {ASSET_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {canAssign ? (
         <div className="space-y-2">
